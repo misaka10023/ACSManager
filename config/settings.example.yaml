@@ -1,10 +1,12 @@
 acs:
   base_url: "https://acs.example.com"
+  session_cookie: "GV_JSESSIONID=replace-with-cookie"  # 用于保持网页会话
   login_user: "your-acs-username"
   login_password: "change-me"
   container_name: "acs-container"
   shutdown_hours: 360
   terminal_selector: "#terminal"
+  container_ip_hint: "10.0.0.5"  # 容器IP初始提示，可选
 
 capture:
   request_filters:
@@ -15,15 +17,22 @@ capture:
     - "address"
 
 ssh:
-  bastion_host: "bastion.example.com"
+  remote_server_ip: "203.0.113.10"  # 远程服务器/跳板机IP
+  bastion_host: "bastion.example.com"  # 若与 remote_server_ip 相同可省略此字段
   bastion_user: "bastion"
   target_user: "root"
+  port: 22  # SSH端口
+  password_login: false  # true 时可结合 password 走密码登录
+  password: "change-me"
   identity_file: "~/.ssh/id_ed25519"
+  container_ip: "10.0.0.5"  # 捕获前的容器IP回退值，可选
+  local_open_port: 8080     # 本地开放端口（直连或默认转发）
+  container_open_port: 80   # 容器开放端口（默认转发目标）
   forwards:
     - local: 8022
-      remote: 22
+      remote: 22    # 容器SSH端口
     - local: 8080
-      remote: 80
+      remote: 80    # 容器业务端口
 
 webui:
   host: "0.0.0.0"

@@ -44,18 +44,31 @@ class ContainerManager:
 
     def build_ssh_command(self, *, reload_config: bool = True) -> List[str]:
         """Compose the ssh command (supports jump host and port forwarding)."""
-        target_ip = self.state.get("container_ip")
+        ssh_cfg = self._ssh_cfg(reload=reload_config)
+        acs_cfg = self._acs_cfg(reload=reload_config)
+
+        target_ip = (
+            self.state.get("container_ip")
+            or ssh_cfg.get("container_ip")
+            or acs_cfg.get("container_ip_hint")
+        )
         if not target_ip:
             raise ValueError("Container IP is unknown. Capture layer has not reported it.")
 
-        ssh_cfg = self._ssh_cfg(reload=reload_config)
         target_user = ssh_cfg.get("target_user", "root")
-        bastion_host = ssh_cfg.get("bastion_host")
+        bastion_host = ssh_cfg.get("bastion_host") or ssh_cfg.get("remote_server_ip")
         bastion_user = ssh_cfg.get("bastion_user") or target_user
         identity_file = ssh_cfg.get("identity_file")
+        ssh_port = ssh_cfg.get("port")
+        password_login = ssh_cfg.get("password_login")
+        password = ssh_cfg.get("password")
         forwards = ssh_cfg.get("forwards", [])
+        local_open_port = ssh_cfg.get("local_open_port")
+        container_open_port = ssh_cfg.get("container_open_port")
 
         cmd: List[str] = ["ssh"]
+        if ssh_port:
+            cmd.extend(["-p", str(ssh_port)])
         if identity_file:
             cmd.extend(["-i", identity_file])
         if bastion_host:
@@ -65,6 +78,12 @@ class ContainerManager:
             remote = spec.get("remote")
             if local and remote:
                 cmd.extend(["-L", f"{local}:localhost:{remote}"])
+        if not forwards and local_open_port and container_open_port:
+            cmd.extend(["-L", f"{local_open_port}:localhost:{container_open_port}"])
+
+        # Password login is not added to the SSH command directly; stored for automation tools.
+        if password_login and password:
+            logger.info("Password login requested; ensure automation handles password entry securely.")
 
         cmd.append(f"{target_user}@{target_ip}")
         return cmd
