@@ -1,38 +1,39 @@
-# ACS ç®¡ç†å™¨é…ç½®ç¤ºä¾‹ï¼ˆæ‰€æœ‰å­—æ®µå‡å«ä¸­æ–‡è¯´æ˜ï¼‰
+# ACS ¹ÜÀíÆ÷ÅäÖÃÊ¾Àı£¨ËùÓĞ×Ö¶Î¾ùº¬ÖĞÎÄËµÃ÷£©
 
 acs:
-  base_url: "https://acs.example.com"          # ACS æ§åˆ¶å°åœ°å€ï¼ˆæŠ“åŒ…é€»è¾‘å°†ç¡¬ç¼–ç ä½¿ç”¨ï¼‰
-  session_cookie: "GV_JSESSIONID=replace"      # ç½‘é¡µä¼šè¯ GV_JSESSIONIDï¼Œä¿æŒç™»å½•æ€
-  login_user: "your-acs-username"              # ç™»å½•ç”¨æˆ·åï¼ˆå¦‚ä½¿ç”¨å…å¯†å¯ç•™ç©ºå¯†ç ï¼‰
-  login_password: "change-me"                  # ç™»å½•å¯†ç 
-  container_name: "acs-container"              # éœ€è¦ç›‘æ§/é‡å¯çš„å®¹å™¨åç§°
-  container_ip_hint: "10.0.0.5"                # æŠ“åŒ…å‰çš„å®¹å™¨ IP æç¤ºï¼ˆå¯é€‰ï¼‰
-  shutdown_hours: 360                          # å®¹å™¨è‡ªåŠ¨å…³æœºçš„å°æ—¶æ•°
-  terminal_selector: "#terminal"               # ç½‘é¡µç»ˆç«¯çš„ DOM é€‰æ‹©å™¨
+  base_url: "https://acs.example.com"          # ACS ¿ØÖÆÌ¨µØÖ·£¨×¥°üÂß¼­½«Ó²±àÂëÊ¹ÓÃ£©
+  session_cookie: "GV_JSESSIONID=replace"      # ÍøÒ³»á»° GV_JSESSIONID£¬±£³ÖµÇÂ¼Ì¬
+  login_user: "your-acs-username"              # µÇÂ¼ÓÃ»§Ãû£¨ÈçÊ¹ÓÃÃâÃÜ¿ÉÁô¿ÕÃÜÂë£©
+  login_password: "change-me"                  # µÇÂ¼ÃÜÂë
+  container_name: "acs-container"              # ÈİÆ÷Ãû³Æ
+  container_task_name: "E2SRLF"                 # ÈÎÎñÃû³Æ/ÈİÆ÷±ğÃû£¬Æô¶¯ÈİÆ÷Ê±Ê¹ÓÃ
+  container_ip_hint: "10.0.0.5"                # ×¥°üÇ°µÄÈİÆ÷ IP ÌáÊ¾£¨¿ÉÑ¡£©
+  shutdown_hours: 360                           # ÈİÆ÷×Ô¶¯¹Ø»úµÄĞ¡Ê±Êı
+  terminal_selector: "#terminal"               # ÍøÒ³ÖÕ¶ËµÄ DOM Ñ¡ÔñÆ÷
 
 ssh:
-  mode: "jump"                                 # ssh æ¨¡å¼ï¼šdirect(ç›´è¿) | jump(-J) | double(ä¸¤æ®µ ssh)
-  remote_server_ip: "203.0.113.10"             # è·³æ¿æœº/è¿œç¨‹æœåŠ¡å™¨ IP
-  bastion_host: "bastion.example.com"          # -J ä½¿ç”¨çš„è·³æ¿ä¸»æœºï¼ˆå¯ä¸ remote_server_ip ç›¸åŒï¼‰
-  bastion_user: "bastion"                      # è·³æ¿ç™»å½•ç”¨æˆ·
-  target_user: "root"                          # å®¹å™¨ä¸»æœºç™»å½•ç”¨æˆ·
-  port: 22                                     # å¤–å±‚/é»˜è®¤ ssh ç«¯å£
-  container_port: 22                           # å†…å±‚ ssh ç«¯å£ï¼ˆdouble æ¨¡å¼ï¼‰ï¼Œæœªè®¾åˆ™ä½¿ç”¨ port
-  password_login: false                        # true ä½¿ç”¨å¯†ç ç™»å½•ï¼›false ä½¿ç”¨å¯†é’¥
-  password: "change-me"                        # å¯†ç ç™»å½•å¯†ç ï¼ˆç”Ÿäº§ç¯å¢ƒè¯·æ›¿æ¢ï¼‰
-  identity_file: "~/.ssh/id_ed25519"           # ç§é’¥è·¯å¾„ï¼ˆå¯†é’¥ç™»å½•ï¼‰
-  container_ip: "10.0.0.5"                     # æ•è·å‰çš„å®¹å™¨ IP å›é€€å€¼
-  local_open_port: 7890                        # æœ¬åœ°ç›‘å¬ç«¯å£ï¼ˆæœ¬åœ°ä»£ç†è½¯ä»¶ç›‘å¬ï¼‰
-  container_open_port: 7890                    # å®¹å™¨å†…ç›‘å¬ç«¯å£ï¼ˆéœ€å®¹å™¨å¼€æ”¾ï¼‰
-  forwards:                                    # é¢å¤–è½¬å‘åˆ—è¡¨ï¼Œremote ä¸ºå®¹å™¨ç«¯å£
+  mode: "jump"                                 # ssh Ä£Ê½£ºdirect(Ö±Á¬) | jump(-J) | double(Á½¶Î ssh)
+  remote_server_ip: "203.0.113.10"             # Ìø°å»ú/Ô¶³Ì·şÎñÆ÷ IP
+  bastion_host: "bastion.example.com"          # -J Ê¹ÓÃµÄÌø°åÖ÷»ú£¨¿ÉÓë remote_server_ip ÏàÍ¬£©
+  bastion_user: "bastion"                      # Ìø°åµÇÂ¼ÓÃ»§
+  target_user: "root"                          # ÈİÆ÷Ö÷»úµÇÂ¼ÓÃ»§
+  port: 22                                      # Íâ²ã/Ä¬ÈÏ ssh ¶Ë¿Ú
+  container_port: 22                            # ÄÚ²ã ssh ¶Ë¿Ú£¨double Ä£Ê½£©£¬Î´ÉèÔòÊ¹ÓÃ port
+  password_login: false                         # true Ê¹ÓÃÃÜÂëµÇÂ¼£»false Ê¹ÓÃÃÜÔ¿
+  password: "change-me"                        # ÃÜÂëµÇÂ¼ÃÜÂë£¨Éú²ú»·¾³ÇëÌæ»»£©
+  identity_file: "~/.ssh/id_ed25519"           # Ë½Ô¿Â·¾¶£¨ÃÜÔ¿µÇÂ¼£©
+  container_ip: "10.0.0.5"                     # ²¶»ñÇ°µÄÈİÆ÷ IP »ØÍËÖµ
+  local_open_port: 7890                         # ±¾µØ¼àÌı¶Ë¿Ú£¨±¾µØ´úÀíÈí¼ş¼àÌı£©
+  container_open_port: 7890                     # ÈİÆ÷ÄÚ¼àÌı¶Ë¿Ú£¨ĞèÈİÆ÷¿ª·Å£©
+  forwards:                                     # ¶îÍâ×ª·¢ÁĞ±í£¬remote ÎªÈİÆ÷¶Ë¿Ú
     - local: 7890
       remote: 7890
     - local: 8022
       remote: 22
 
 webui:
-  host: "0.0.0.0"                              # Web UI ç»‘å®šåœ°å€
-  port: 8000                                   # Web UI ç«¯å£
+  host: "0.0.0.0"                              # Web UI °ó¶¨µØÖ·
+  port: 8000                                    # Web UI ¶Ë¿Ú
 
 logging:
-  level: INFO                                  # æ—¥å¿—çº§åˆ« (DEBUG/INFO/WARNING/ERROR)
+  level: INFO                                   # ÈÕÖ¾¼¶±ğ (DEBUG/INFO/WARNING/ERROR)

@@ -77,6 +77,7 @@ SSH mode examples:
 - `acs.session_cookie`: GV_JSESSIONID cookie string to keep the session alive.
 - `acs.login_user` / `acs.login_password`: credentials for automation or API use.
 - `acs.container_name`: identifier for the container to restart.
+- `acs.container_task_name`: task/alias name used when starting the container (e.g., E2SRLF).
 - `acs.container_ip_hint`: initial container IP hint before capture detects a new one.
 - `acs.shutdown_hours`: expected auto-shutdown window (360h default).
 - `acs.terminal_selector`: DOM selector for the embedded terminal (for automation).
