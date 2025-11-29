@@ -43,7 +43,14 @@ class ContainerManager:
         self.state["last_restart"] = dt.datetime.utcnow()
 
     def build_ssh_command(self, *, reload_config: bool = True) -> List[str]:
-        """Compose the ssh command (supports jump host and port forwarding)."""
+        """
+        Compose the ssh command.
+
+        Supports three modes via config:
+        - direct: simple ssh to the container.
+        - jump: use ProxyJump (-J).
+        - double: two-hop ssh (ssh bastion ... ssh container ...).
+        """
         ssh_cfg = self._ssh_cfg(reload=reload_config)
         acs_cfg = self._acs_cfg(reload=reload_config)
 
@@ -55,6 +62,7 @@ class ContainerManager:
         if not target_ip:
             raise ValueError("Container IP is unknown. Capture layer has not reported it.")
 
+        mode = (ssh_cfg.get("mode") or "jump").lower()
         target_user = ssh_cfg.get("target_user", "root")
         bastion_host = ssh_cfg.get("bastion_host") or ssh_cfg.get("remote_server_ip")
         bastion_user = ssh_cfg.get("bastion_user") or target_user
@@ -66,26 +74,51 @@ class ContainerManager:
         local_open_port = ssh_cfg.get("local_open_port")
         container_open_port = ssh_cfg.get("container_open_port")
 
-        cmd: List[str] = ["ssh"]
-        if ssh_port:
-            cmd.extend(["-p", str(ssh_port)])
-        if identity_file:
-            cmd.extend(["-i", identity_file])
-        if bastion_host:
-            cmd.extend(["-J", f"{bastion_user}@{bastion_host}"])
-        for spec in forwards:
-            local = spec.get("local")
-            remote = spec.get("remote")
-            if local and remote:
-                cmd.extend(["-L", f"{local}:localhost:{remote}"])
-        if not forwards and local_open_port and container_open_port:
-            cmd.extend(["-L", f"{local_open_port}:localhost:{container_open_port}"])
+        def add_forwards(base: List[str]) -> None:
+            for spec in forwards:
+                local = spec.get("local")
+                remote = spec.get("remote")
+                if local and remote:
+                    base.extend(["-L", f"{local}:localhost:{remote}"])
+            if not forwards and local_open_port and container_open_port:
+                base.extend(["-L", f"{local_open_port}:localhost:{container_open_port}"])
 
-        # Password login is not added to the SSH command directly; stored for automation tools.
+        def add_identity(base: List[str]) -> None:
+            if identity_file:
+                base.extend(["-i", identity_file])
+
+        def add_port(base: List[str], port_value: Any) -> None:
+            if port_value:
+                base.extend(["-p", str(port_value)])
+
+        if mode == "double":
+            # ssh to bastion, then ssh from bastion to container
+            if not bastion_host:
+                raise ValueError("double mode requires ssh.bastion_host or ssh.remote_server_ip")
+            outer: List[str] = ["ssh"]
+            add_identity(outer)
+            add_port(outer, ssh_port)
+            outer.append(f"{bastion_user}@{bastion_host}")
+            inner: List[str] = ["ssh"]
+            add_port(inner, ssh_cfg.get("container_port") or ssh_port)
+            add_identity(inner)
+            add_forwards(inner)
+            inner.append(f"{target_user}@{target_ip}")
+            outer.append(" ".join(inner))
+            cmd = outer
+        else:
+            cmd: List[str] = ["ssh"]
+            add_port(cmd, ssh_port)
+            add_identity(cmd)
+            if mode == "jump":
+                if not bastion_host:
+                    raise ValueError("jump mode requires ssh.bastion_host or ssh.remote_server_ip")
+                cmd.extend(["-J", f"{bastion_user}@{bastion_host}"])
+            add_forwards(cmd)
+            cmd.append(f"{target_user}@{target_ip}")
+
         if password_login and password:
             logger.info("Password login requested; ensure automation handles password entry securely.")
-
-        cmd.append(f"{target_user}@{target_ip}")
         return cmd
 
     def snapshot(self) -> Dict[str, Any]:

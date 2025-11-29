@@ -5,7 +5,7 @@ Monitor the ACS web console, detect when long-running containers shut down, rest
 ## Features
 - Packet capture stub for ACS web console traffic; hook up DevTools/mitmproxy/playwright to feed events.
 - Management controller placeholder to restart the container and track last-seen IP/restart timestamps.
-- SSH command builder that supports jump hosts (`-J`), `-p` port override, and multiple `-L` forwards (with a default forward fallback).
+- SSH command builder that supports direct, ProxyJump (`-J`), and two-hop (double ssh) modes, with `-p` port override and multiple `-L` forwards (plus a default forward fallback).
 - FastAPI-based Web UI exposing health/state plus live config read/write endpoints.
 - ConfigStore with atomic YAML/JSON read/write so the app and Web UI share the latest settings.
 
@@ -45,7 +45,7 @@ Monitor the ACS web console, detect when long-running containers shut down, rest
 - GET `/config?reload=true` returns the latest YAML/JSON from disk (reloaded each request by default).
 - PATCH `/config` with a JSON object to shallow-merge updates and persist to disk atomically.
 - PUT `/config` with a JSON object to replace the config entirely.
-- ContainerManager and SSH command building read from the shared ConfigStore so changes are visible without restart. If you change capture targets (e.g., ACS base URL), restart the process so the sniffer uses the new target.
+- ContainerManager, PacketSniffer, and Web UI all read/write via ConfigStore, so updates go through the config module. If you change capture targets (e.g., ACS base URL), restart the process so the sniffer uses the new target; SSH-related changes take effect immediately for newly built commands.
 
 Example (update jump host):
 ```bash
@@ -53,6 +53,18 @@ curl -X PATCH http://localhost:8000/config \
   -H "Content-Type: application/json" \
   -d "{\"ssh\":{\"bastion_host\":\"bastion.example.com\"}}"
 ```
+
+SSH mode examples:
+- jump (`ssh.mode=jump`): `ssh -J bastion@203.0.113.10 target@<container_ip>`
+- double (`ssh.mode=double`): `ssh bastion@203.0.113.10 "ssh -p 22 -L 8080:localhost:80 target@<container_ip>"`
+- config-style analogy: 
+  ```
+  Host container
+      HostName <container_ip>
+      User target
+      ProxyJump bastion@203.0.113.10
+      IdentityFile ~/.ssh/id_rsa
+  ```
 
 ## Configuration (settings.example.yaml)
 - `acs.base_url`: ACS web console base URL.
@@ -63,8 +75,10 @@ curl -X PATCH http://localhost:8000/config \
 - `acs.shutdown_hours`: expected auto-shutdown window (360h default).
 - `acs.terminal_selector`: DOM selector for the embedded terminal (for automation).
 - `capture.request_filters` / `capture.response_keywords`: strings to help you filter relevant network events.
+- `ssh.mode`: `direct` | `jump` (-J) | `double` (two-hop ssh through bastion).
 - `ssh.remote_server_ip` or `ssh.bastion_host`: jump host / remote server IP for double SSH.
-- `ssh.port`: SSH port.
+- `ssh.port`: SSH port for the outer/default connection.
+- `ssh.container_port`: inner hop port when `mode=double` (falls back to `ssh.port` if omitted).
 - `ssh.target_user`: user for the container host.
 - `ssh.password_login` + `ssh.password`: optional password auth (not injected into ssh CLI; use automation).
 - `ssh.identity_file`: private key path used by SSH (for key-based auth).

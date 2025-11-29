@@ -17,11 +17,13 @@ capture:
     - "address"
 
 ssh:
+  mode: "jump"            # 可选: direct | jump (-J) | double (两段ssh)
   remote_server_ip: "203.0.113.10"  # 远程服务器/跳板机IP
   bastion_host: "bastion.example.com"  # 若与 remote_server_ip 相同可省略此字段
   bastion_user: "bastion"
   target_user: "root"
   port: 22  # SSH端口
+  container_port: 22  # 双层ssh时内层端口，如不设则回落到 port
   password_login: false  # true 时可结合 password 走密码登录
   password: "change-me"
   identity_file: "~/.ssh/id_ed25519"
