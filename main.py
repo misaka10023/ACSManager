@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import datetime as dt
 import logging
+from pathlib import Path
 from typing import Any
 
 import uvicorn
@@ -22,7 +24,24 @@ async def start_web_ui(web_cfg: dict[str, Any]) -> None:
     await server.serve()
 
 
-async def run(config_path: str) -> None:
+def setup_logging(log_level: str) -> Path:
+    """Configure logging to console + daily file under ./logs/YYYY-MM-DD.log."""
+    log_dir = Path("logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"{dt.date.today()}.log"
+    handlers = [
+        logging.FileHandler(log_path, encoding="utf-8"),
+        logging.StreamHandler(),
+    ]
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper(), logging.INFO),
+        format="[%(asctime)s] %(levelname)s %(name)s: %(message)s",
+        handlers=handlers,
+    )
+    return log_path
+
+
+async def run(config_path: str, log_level: str) -> None:
     store = ConfigStore(config_path)
     manager = ContainerManager(store)
     web_app.bind_manager(manager)
@@ -38,13 +57,18 @@ async def run(config_path: str) -> None:
     )
 
     web_cfg = store.get_section("webui", default={}, reload=True)
-    tasks = [asyncio.create_task(sniffer.start())]
-    tasks.append(asyncio.create_task(start_web_ui(web_cfg)))
+    tasks = [
+        asyncio.create_task(sniffer.start()),
+        asyncio.create_task(start_web_ui(web_cfg)),
+        asyncio.create_task(manager.maintain_tunnel()),
+    ]
     logging.info("ACS Manager running. Press Ctrl+C to exit.")
     try:
         await asyncio.gather(*tasks)
     except asyncio.CancelledError:
         logging.info("Shutdown requested.")
+    finally:
+        await manager.shutdown()
 
 
 def parse_args() -> argparse.Namespace:
@@ -65,8 +89,6 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
-    logging.basicConfig(
-        level=getattr(logging, args.log_level.upper(), logging.INFO),
-        format="[%(asctime)s] %(levelname)s %(name)s: %(message)s",
-    )
-    asyncio.run(run(args.config))
+    log_path = setup_logging(args.log_level)
+    logging.info("Log file: %s", log_path)
+    asyncio.run(run(args.config, args.log_level))

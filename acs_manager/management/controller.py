@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import logging
-from typing import Any, Dict, List
+from asyncio.subprocess import Process
+from typing import Any, Dict, List, Optional
 
 from acs_manager.config.store import ConfigStore
 
@@ -10,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class ContainerManager:
-    """Handle ACS container lifecycle, IP tracking, and SSH composition."""
+    """Handle ACS container lifecycle, IP tracking, and SSH composition/maintenance."""
 
     def __init__(self, store: ConfigStore) -> None:
         self.store = store
@@ -18,13 +20,19 @@ class ContainerManager:
             "container_ip": None,
             "last_restart": None,
             "last_seen": None,
+            "tunnel_status": "stopped",
+            "tunnel_last_exit": None,
         }
+        self._tunnel_process: Optional[Process] = None
+        self._proc_lock = asyncio.Lock()
+        self._stop_requested = False
 
     async def handle_new_ip(self, ip: str) -> None:
-        """Update state when the sniffer reports a fresh IP."""
+        """Update state when the sniffer reports a fresh IP and restart tunnel."""
         self.state["container_ip"] = ip
         self.state["last_seen"] = dt.datetime.utcnow()
         logger.info("Container IP updated to %s", ip)
+        await self.restart_tunnel()
 
     async def ensure_running(self) -> None:
         """
@@ -120,6 +128,71 @@ class ContainerManager:
         if password_login and password:
             logger.info("Password login requested; ensure automation handles password entry securely.")
         return cmd
+
+    def build_tunnel_command(self) -> List[str]:
+        """Return ssh command for a persistent tunnel with port forwarding."""
+        base = self.build_ssh_command()
+        return ["ssh", "-o", "ExitOnForwardFailure=yes", "-N"] + base[1:]
+
+    async def start_tunnel(self) -> None:
+        """Start the SSH tunnel process if not already running."""
+        async with self._proc_lock:
+            if self._tunnel_process and self._tunnel_process.returncode is None:
+                return
+            try:
+                cmd = self.build_tunnel_command()
+            except Exception as exc:
+                logger.error("Cannot build tunnel command: %s", exc)
+                self.state["tunnel_status"] = "error"
+                return
+
+            logger.info("Starting SSH tunnel: %s", " ".join(cmd))
+            proc = await asyncio.create_subprocess_exec(*cmd)
+            self._tunnel_process = proc
+            self.state["tunnel_status"] = "running"
+
+    async def stop_tunnel(self) -> None:
+        """Stop the SSH tunnel process and ensure port cleanup."""
+        async with self._proc_lock:
+            proc = self._tunnel_process
+            if not proc:
+                return
+            if proc.returncode is None:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    proc.kill()
+            self.state["tunnel_last_exit"] = dt.datetime.utcnow()
+            self.state["tunnel_status"] = "stopped"
+            self._tunnel_process = None
+
+    async def restart_tunnel(self) -> None:
+        """Restart tunnel to refresh forwarding and clean up ports."""
+        await self.stop_tunnel()
+        await self.start_tunnel()
+
+    async def maintain_tunnel(self) -> None:
+        """Keep the SSH tunnel alive; restart on exit or errors."""
+        while not self._stop_requested:
+            await self.start_tunnel()
+            proc = self._tunnel_process
+            if proc is None:
+                await asyncio.sleep(3)
+                continue
+            try:
+                rc = await proc.wait()
+                logger.warning("SSH tunnel exited with code %s; restarting soon.", rc)
+            except Exception as exc:  # pragma: no cover - subprocess errors
+                logger.error("SSH tunnel crashed: %s", exc)
+            finally:
+                await self.stop_tunnel()
+            await asyncio.sleep(3)
+
+    async def shutdown(self) -> None:
+        """Signal loop to stop and clean up the tunnel."""
+        self._stop_requested = True
+        await self.stop_tunnel()
 
     def snapshot(self) -> Dict[str, Any]:
         """Return a shallow copy of current state for the web UI."""

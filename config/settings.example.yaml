@@ -1,44 +1,46 @@
+# ACS 管理器配置示例（所有字段均含中文说明）
+
 acs:
-  base_url: "https://acs.example.com"
-  session_cookie: "GV_JSESSIONID=replace-with-cookie"  # 用于保持网页会话
-  login_user: "your-acs-username"
-  login_password: "change-me"
-  container_name: "acs-container"
-  shutdown_hours: 360
-  terminal_selector: "#terminal"
-  container_ip_hint: "10.0.0.5"  # 容器IP初始提示，可选
+  base_url: "https://acs.example.com"          # ACS 控制台地址
+  session_cookie: "GV_JSESSIONID=replace"      # 网页会话 GV_JSESSIONID，保持登录态
+  login_user: "your-acs-username"              # 登录用户名（如使用免密可留空密码）
+  login_password: "change-me"                  # 登录密码
+  container_name: "acs-container"              # 需要监控/重启的容器名称
+  container_ip_hint: "10.0.0.5"                # 抓包前的容器 IP 提示（可选）
+  shutdown_hours: 360                          # 容器自动关机的小时数
+  terminal_selector: "#terminal"               # 网页终端的 DOM 选择器
 
 capture:
-  request_filters:
+  request_filters:                             # 抓包时过滤请求 URL/路径关键词
     - "containers"
     - "ip"
-  response_keywords:
+  response_keywords:                           # 抓包时在响应内容中搜索的关键词
     - "ip"
     - "address"
 
 ssh:
-  mode: "jump"            # 可选: direct | jump (-J) | double (两段ssh)
-  remote_server_ip: "203.0.113.10"  # 远程服务器/跳板机IP
-  bastion_host: "bastion.example.com"  # 若与 remote_server_ip 相同可省略此字段
-  bastion_user: "bastion"
-  target_user: "root"
-  port: 22  # SSH端口
-  container_port: 22  # 双层ssh时内层端口，如不设则回落到 port
-  password_login: false  # true 时可结合 password 走密码登录
-  password: "change-me"
-  identity_file: "~/.ssh/id_ed25519"
-  container_ip: "10.0.0.5"  # 捕获前的容器IP回退值，可选
-  local_open_port: 8080     # 本地开放端口（直连或默认转发）
-  container_open_port: 80   # 容器开放端口（默认转发目标）
-  forwards:
+  mode: "jump"                                 # ssh 模式：direct(直连) | jump(-J) | double(两段 ssh)
+  remote_server_ip: "203.0.113.10"             # 跳板机/远程服务器 IP
+  bastion_host: "bastion.example.com"          # -J 使用的跳板主机（可与 remote_server_ip 相同）
+  bastion_user: "bastion"                      # 跳板登录用户
+  target_user: "root"                          # 容器主机登录用户
+  port: 22                                     # 外层/默认 ssh 端口
+  container_port: 22                           # 内层 ssh 端口（double 模式），未设则使用 port
+  password_login: false                        # true 使用密码登录；false 使用密钥
+  password: "change-me"                        # 密码登录密码（生产环境请替换）
+  identity_file: "~/.ssh/id_ed25519"           # 私钥路径（密钥登录）
+  container_ip: "10.0.0.5"                     # 捕获前的容器 IP 回退值
+  local_open_port: 7890                        # 本地监听端口（本地代理软件监听）
+  container_open_port: 7890                    # 容器内监听端口（需容器开放）
+  forwards:                                    # 额外转发列表，remote 为容器端口
+    - local: 7890
+      remote: 7890
     - local: 8022
-      remote: 22    # 容器SSH端口
-    - local: 8080
-      remote: 80    # 容器业务端口
+      remote: 22
 
 webui:
-  host: "0.0.0.0"
-  port: 8000
+  host: "0.0.0.0"                              # Web UI 绑定地址
+  port: 8000                                   # Web UI 端口
 
 logging:
-  level: INFO
+  level: INFO                                  # 日志级别 (DEBUG/INFO/WARNING/ERROR)

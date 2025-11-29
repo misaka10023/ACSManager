@@ -4,9 +4,9 @@ Monitor the ACS web console, detect when long-running containers shut down, rest
 
 ## Features
 - Packet capture stub for ACS web console traffic; hook up DevTools/mitmproxy/playwright to feed events.
-- Management controller placeholder to restart the container and track last-seen IP/restart timestamps.
-- SSH command builder that supports direct, ProxyJump (`-J`), and two-hop (double ssh) modes, with `-p` port override and multiple `-L` forwards (plus a default forward fallback).
-- FastAPI-based Web UI exposing health/state plus live config read/write endpoints.
+- Management controller keeps an SSH tunnel alive for port forwarding (direct / `-J` / double-ssh), restarts on disconnect, and cleans up before re-establishing.
+- Web UI for remote config edits, viewing state, tailing logs, and fetching container IP.
+- Logging goes to `logs/YYYY-MM-DD.log` plus console.
 - ConfigStore with atomic YAML/JSON read/write so the app and Web UI share the latest settings.
 
 ## Project layout
@@ -41,11 +41,13 @@ Monitor the ACS web console, detect when long-running containers shut down, rest
    ```
 5) Web UI (served by the same process): visit `http://localhost:8000/health`, `/state`, and `/config`.
 
-## Runtime configuration
+## Runtime configuration & Web UI
 - GET `/config?reload=true` returns the latest YAML/JSON from disk (reloaded each request by default).
 - PATCH `/config` with a JSON object to shallow-merge updates and persist to disk atomically.
 - PUT `/config` with a JSON object to replace the config entirely.
+- GET `/state` shows runtime state; GET `/container-ip` returns captured or fallback IP; GET `/logs?lines=200` tails the latest log file.
 - ContainerManager, PacketSniffer, and Web UI all read/write via ConfigStore, so updates go through the config module. If you change capture targets (e.g., ACS base URL), restart the process so the sniffer uses the new target; SSH-related changes take effect immediately for newly built commands.
+- Web UI scope: remote config edits, runtime state, tunnel/log visibility, and container IP retrieval.
 
 Example (update jump host):
 ```bash
@@ -56,7 +58,7 @@ curl -X PATCH http://localhost:8000/config \
 
 SSH mode examples:
 - jump (`ssh.mode=jump`): `ssh -J bastion@203.0.113.10 target@<container_ip>`
-- double (`ssh.mode=double`): `ssh bastion@203.0.113.10 "ssh -p 22 -L 8080:localhost:80 target@<container_ip>"`
+- double (`ssh.mode=double`): `ssh bastion@203.0.113.10 "ssh -p 22 -L 7890:localhost:7890 target@<container_ip>"`
 - config-style analogy: 
   ```
   Host container
@@ -65,6 +67,10 @@ SSH mode examples:
       ProxyJump bastion@203.0.113.10
       IdentityFile ~/.ssh/id_rsa
   ```
+
+## Logging
+- Location: `logs/YYYY-MM-DD.log` (auto-created on startup) plus console output.
+- Web UI: GET `/logs?lines=200` to tail the latest log.
 
 ## Configuration (settings.example.yaml)
 - `acs.base_url`: ACS web console base URL.
