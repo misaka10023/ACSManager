@@ -46,7 +46,7 @@ Monitor the ACS web console, detect when long-running containers shut down, rest
 - PATCH `/config` with a JSON object to shallow-merge updates and persist to disk atomically.
 - PUT `/config` with a JSON object to replace the config entirely.
 - GET `/state` shows runtime state; GET `/container-ip` returns captured or fallback IP; GET `/logs?lines=200` tails the latest log file.
-- ContainerManager, PacketSniffer, and Web UI all read/write via ConfigStore, so updates go through the config module. If you change capture targets (e.g., ACS base URL), restart the process so the sniffer uses the new target; SSH-related changes take effect immediately for newly built commands.
+- ContainerManager, PacketSniffer, and Web UI all read/write via ConfigStore, so updates go through the config module. If you change ACS base URL, restart the process so the sniffer uses the new target; SSH-related changes take effect immediately for newly built commands.
 - Web UI scope: remote config edits, runtime state, tunnel/log visibility, and container IP retrieval.
 
 Example (update jump host):
@@ -80,7 +80,7 @@ SSH mode examples:
 - `acs.container_ip_hint`: initial container IP hint before capture detects a new one.
 - `acs.shutdown_hours`: expected auto-shutdown window (360h default).
 - `acs.terminal_selector`: DOM selector for the embedded terminal (for automation).
-- `capture.request_filters` / `capture.response_keywords`: strings to help you filter relevant network events.
+- Capture filters are hard-coded in code; no capture.* config is required.
 - `ssh.mode`: `direct` | `jump` (-J) | `double` (two-hop ssh through bastion).
 - `ssh.remote_server_ip` or `ssh.bastion_host`: jump host / remote server IP for double SSH.
 - `ssh.port`: SSH port for the outer/default connection.
@@ -101,6 +101,6 @@ SSH mode examples:
 4) The FastAPI endpoints expose health, current state, and live config for lightweight monitoring.
 
 ## Notes / next steps
-- Implement real capture using DevTools, playwright, or mitmproxy to push events into `PacketSniffer.handle_event`.
+- Capture rules will be hard-coded later; no capture-related config is needed now.
 - Implement ACS restart + terminal scraping inside `ContainerManager.restart_container` and the capture layer.
 - Add tests and error handling once the concrete ACS integration is known.

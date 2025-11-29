@@ -1,7 +1,7 @@
 # ACS 管理器配置示例（所有字段均含中文说明）
 
 acs:
-  base_url: "https://acs.example.com"          # ACS 控制台地址
+  base_url: "https://acs.example.com"          # ACS 控制台地址（抓包逻辑将硬编码使用）
   session_cookie: "GV_JSESSIONID=replace"      # 网页会话 GV_JSESSIONID，保持登录态
   login_user: "your-acs-username"              # 登录用户名（如使用免密可留空密码）
   login_password: "change-me"                  # 登录密码
@@ -9,14 +9,6 @@ acs:
   container_ip_hint: "10.0.0.5"                # 抓包前的容器 IP 提示（可选）
   shutdown_hours: 360                          # 容器自动关机的小时数
   terminal_selector: "#terminal"               # 网页终端的 DOM 选择器
-
-capture:
-  request_filters:                             # 抓包时过滤请求 URL/路径关键词
-    - "containers"
-    - "ip"
-  response_keywords:                           # 抓包时在响应内容中搜索的关键词
-    - "ip"
-    - "address"
 
 ssh:
   mode: "jump"                                 # ssh 模式：direct(直连) | jump(-J) | double(两段 ssh)
