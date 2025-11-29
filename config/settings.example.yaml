@@ -1,0 +1,33 @@
+acs:
+  base_url: "https://acs.example.com"
+  login_user: "your-acs-username"
+  login_password: "change-me"
+  container_name: "acs-container"
+  shutdown_hours: 360
+  terminal_selector: "#terminal"
+
+capture:
+  request_filters:
+    - "containers"
+    - "ip"
+  response_keywords:
+    - "ip"
+    - "address"
+
+ssh:
+  bastion_host: "bastion.example.com"
+  bastion_user: "bastion"
+  target_user: "root"
+  identity_file: "~/.ssh/id_ed25519"
+  forwards:
+    - local: 8022
+      remote: 22
+    - local: 8080
+      remote: 80
+
+webui:
+  host: "0.0.0.0"
+  port: 8000
+
+logging:
+  level: INFO
