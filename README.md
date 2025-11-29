@@ -6,8 +6,8 @@ Monitor the ACS web console, detect when long-running containers shut down, rest
 - Packet capture stub for ACS web console traffic; hook up DevTools/mitmproxy/playwright to feed events.
 - Management controller placeholder to restart the container and track last-seen IP/restart timestamps.
 - SSH command builder that supports jump hosts (`-J`) and multiple `-L` forwards.
-- FastAPI-based Web UI exposing health and current state.
-- Simple YAML/JSON configuration loader and runnable entrypoint.
+- FastAPI-based Web UI exposing health/state plus live config read/write endpoints.
+- ConfigStore with atomic YAML/JSON read/write so the app and Web UI share the latest settings.
 
 ## Project layout
 ```
@@ -15,8 +15,8 @@ Monitor the ACS web console, detect when long-running containers shut down, rest
 ©À©¤ acs_manager/
 ©¦  ©À©¤ capture/          # Sniffer stub for ACS traffic -> extracts container IP
 ©¦  ©À©¤ management/       # Container lifecycle + SSH orchestration
-©¦  ©À©¤ webui/            # FastAPI app exposing health/state
-©¦  ©¸©¤ config/           # Config loader utilities
+©¦  ©À©¤ webui/            # FastAPI app exposing health/state/config
+©¦  ©¸©¤ config/           # Config loader and ConfigStore
 ©À©¤ config/
 ©¦  ©¸©¤ settings.example.yaml   # Sample configuration
 ©À©¤ main.py              # Entrypoint: ties capture, manager, web UI
@@ -43,7 +43,20 @@ Monitor the ACS web console, detect when long-running containers shut down, rest
    ```bash
    python main.py --config config/settings.yaml --log-level DEBUG
    ```
-5. Web UI (served by the same process): visit `http://localhost:8000/health` and `http://localhost:8000/state`.
+5. Web UI (served by the same process): visit `http://localhost:8000/health`, `/state`, and `/config`.
+
+## Runtime configuration
+- GET `/config?reload=true` returns the latest YAML/JSON from disk (reloaded each request by default).
+- PATCH `/config` with a JSON object to shallow-merge updates and persist to disk atomically.
+- PUT `/config` with a JSON object to replace the config entirely.
+- ContainerManager and SSH command building read from the shared ConfigStore so changes are visible without restart. If you change capture targets (e.g., ACS base URL), restart the process so the sniffer uses the new target.
+
+Example (update jump host):
+```bash
+curl -X PATCH http://localhost:8000/config \
+  -H "Content-Type: application/json" \
+  -d "{\"ssh\":{\"bastion_host\":\"bastion.example.com\"}}"
+```
 
 ## Configuration (settings.example.yaml)
 - `acs.base_url`: ACS web console base URL.
@@ -63,7 +76,7 @@ Monitor the ACS web console, detect when long-running containers shut down, rest
 1. `PacketSniffer` attaches to ACS web console traffic (you wire in the actual capture mechanism) and sends parsed events to `handle_event`, which extracts container IPs.
 2. When the ACS container stops after ~360 hours, implement restart logic in `ContainerManager.restart_container` (browser automation/API call).
 3. Once a new IP is seen, `ContainerManager` stores it and builds the SSH command with jump host + `-L` forwards so you can reconnect.
-4. The FastAPI endpoints expose health and current state for lightweight monitoring.
+4. The FastAPI endpoints expose health, current state, and live config for lightweight monitoring.
 
 ## Notes / next steps
 - Implement real capture using DevTools, playwright, or mitmproxy to push events into `PacketSniffer.handle_event`.

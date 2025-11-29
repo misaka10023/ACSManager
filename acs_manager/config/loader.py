@@ -32,7 +32,30 @@ def load_settings(path: str | Path) -> Dict[str, Any]:
     )
 
 
-def get_section(settings: Dict[str, Any], key: str, default: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def dump_settings(path: str | Path, data: Dict[str, Any]) -> None:
+    """Persist configuration to YAML or JSON, writing atomically."""
+    config_path = Path(path)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    suffix = config_path.suffix.lower()
+    if suffix in {".yml", ".yaml"}:
+        payload = yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+    elif suffix == ".json":
+        payload = json.dumps(data, indent=2)
+    else:
+        raise ValueError(
+            f"Unsupported config format for {config_path}. Use YAML or JSON."
+        )
+
+    temp_path = config_path.with_suffix(config_path.suffix + ".tmp")
+    with temp_path.open("w", encoding="utf-8") as handle:
+        handle.write(payload)
+    temp_path.replace(config_path)
+
+
+def get_section(
+    settings: Dict[str, Any], key: str, default: Dict[str, Any] | None = None
+) -> Dict[str, Any]:
     """Safely pull a nested section with a default when missing."""
     value = settings.get(key, default or {})
     if not isinstance(value, dict):

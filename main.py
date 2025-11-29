@@ -8,7 +8,7 @@ from typing import Any
 import uvicorn
 
 from acs_manager.capture.sniffer import PacketSniffer
-from acs_manager.config.loader import load_settings
+from acs_manager.config import ConfigStore
 from acs_manager.management.controller import ContainerManager
 from acs_manager.webui import app as web_app
 
@@ -23,19 +23,21 @@ async def start_web_ui(web_cfg: dict[str, Any]) -> None:
 
 
 async def run(config_path: str) -> None:
-    settings = load_settings(config_path)
-    manager = ContainerManager(settings)
+    store = ConfigStore(config_path)
+    manager = ContainerManager(store)
     web_app.bind_manager(manager)
+    web_app.bind_config_store(store)
 
     async def on_new_ip(ip: str) -> None:
         await manager.handle_new_ip(ip)
 
+    acs_cfg = store.get_section("acs", default={}, reload=True)
     sniffer = PacketSniffer(
-        target_url=settings.get("acs", {}).get("base_url", ""),
+        target_url=acs_cfg.get("base_url", ""),
         on_new_ip=lambda ip: asyncio.create_task(on_new_ip(ip)),
     )
 
-    web_cfg = settings.get("webui", {})
+    web_cfg = store.get_section("webui", default={}, reload=True)
     tasks = [asyncio.create_task(sniffer.start())]
     tasks.append(asyncio.create_task(start_web_ui(web_cfg)))
     logging.info("ACS Manager running. Press Ctrl+C to exit.")
