@@ -139,6 +139,29 @@ class ContainerManager:
                 continue
         return None
 
+    def _parse_remaining_time_str(self, value: Optional[str]) -> Optional[int]:
+        """
+        解析 ACS 提供的 remainingTime 文本，例如 \"14d 23h 48m\"，返回秒数。
+        """
+        if not value:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        total = 0
+        for part in text.split():
+            part = part.strip()
+            try:
+                if part.endswith("d"):
+                    total += int(part[:-1]) * 24 * 3600
+                elif part.endswith("h"):
+                    total += int(part[:-1]) * 3600
+                elif part.endswith("m"):
+                    total += int(part[:-1]) * 60
+            except ValueError:
+                continue
+        return total or None
+
     async def monitor_container(self, *, pre_shutdown_minutes: int = 10, slow_interval: int = 300, fast_interval: int = 30) -> None:
         """
         周期检查容器状态；接近超时时缩短检查间隔，停止时立即重启。
@@ -172,27 +195,38 @@ class ContainerManager:
                     if ip:
                         await self.handle_new_ip(ip)
 
-                    start_dt = self._parse_start_time(start_time_str)
-                    if start_dt and info.get("timeoutLimit"):
-                        try:
-                            hours, minutes, seconds = info["timeoutLimit"].split(":")
-                            delta = dt.timedelta(hours=int(hours), minutes=int(minutes), seconds=int(seconds))
-                            next_shutdown = start_dt + delta
-                            self.state["next_shutdown"] = next_shutdown
-                            threshold = next_shutdown - dt.timedelta(minutes=pre_shutdown_minutes)
-                            now = dt.datetime.utcnow()
-                            remaining = (next_shutdown - now).total_seconds()
-                            self.state["remaining_seconds"] = int(remaining) if remaining > 0 else 0
-                            interval = fast_interval if now >= threshold else slow_interval
-                        except Exception:
+                    # 优先使用 ACS 提供的 remainingTime 计算剩余时间，再回退到 startTime+timeoutLimit
+                    remaining_text = info.get("remainingTime")
+                    remaining_from_str = self._parse_remaining_time_str(remaining_text)
+                    now = dt.datetime.utcnow()
+                    if remaining_from_str is not None:
+                        delta = dt.timedelta(seconds=remaining_from_str)
+                        next_shutdown = now + delta
+                        self.state["next_shutdown"] = next_shutdown.strftime("%Y-%m-%d %H:%M:%S")
+                        self.state["remaining_seconds"] = remaining_from_str
+                        interval = fast_interval if remaining_from_str <= pre_shutdown_minutes * 60 else slow_interval
+                    else:
+                        start_dt = self._parse_start_time(start_time_str)
+                        if start_dt and info.get("timeoutLimit"):
+                            try:
+                                hours, minutes, seconds = info["timeoutLimit"].split(":")
+                                delta = dt.timedelta(hours=int(hours), minutes=int(minutes), seconds=int(seconds))
+                                next_shutdown = start_dt + delta
+                                self.state["next_shutdown"] = next_shutdown.strftime("%Y-%m-%d %H:%M:%S")
+                                threshold = next_shutdown - dt.timedelta(minutes=pre_shutdown_minutes)
+                                remaining = (next_shutdown - now).total_seconds()
+                                self.state["remaining_seconds"] = int(remaining) if remaining > 0 else 0
+                                interval = fast_interval if now >= threshold else slow_interval
+                            except Exception:
+                                self.state["next_shutdown"] = None
+                                self.state["remaining_seconds"] = None
+                                interval = slow_interval
+                        else:
                             self.state["next_shutdown"] = None
                             self.state["remaining_seconds"] = None
                             interval = slow_interval
-                    # 记录 ACS 提供的 remainingTime（如果有），仅用于前端展示
-                    if info.get("remainingTime"):
-                        self.state["remaining_time_str"] = str(info["remainingTime"])
-                    else:
-                        self.state["remaining_time_str"] = None
+                    # 记录 ACS 提供的 remainingTime（如果有），供前端展示
+                    self.state["remaining_time_str"] = str(remaining_text) if remaining_text else None
 
                     status_norm = (status or "").lower()
                     stop_statuses = {"terminated", "stopped", "stop", "failed"}
