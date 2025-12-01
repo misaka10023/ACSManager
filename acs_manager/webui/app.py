@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional
@@ -43,8 +43,7 @@ def container_ip() -> dict:
         raise HTTPException(status_code=503, detail="Manager not wired to web UI yet")
     ip = manager.snapshot().get("container_ip")
     if not ip:
-        # 尝试用配置中的回退值
-        fallback = None
+        # 灏濊瘯鐢ㄩ厤缃腑鐨勫洖閫€鍊?        fallback = None
         if config_store:
             settings = config_store.read(reload=True)
             fallback = (

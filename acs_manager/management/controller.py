@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import datetime as dt
@@ -54,27 +54,27 @@ class ContainerManager:
         acs_cfg = self._acs_cfg(reload=True)
         name = acs_cfg.get("container_name")
         if not name:
-            logger.error("未配置 container_name，无法重启。")
+            logger.error("鏈厤缃?container_name锛屾棤娉曢噸鍚€?)
             return
 
         task = self.container_client.find_instance_by_name(name)
         if not task:
-            logger.error("未找到容器 %s，无法重启。", name)
+            logger.error("鏈壘鍒板鍣?%s锛屾棤娉曢噸鍚€?, name)
             return
         task_id = task.get("instanceServiceId") or task.get("id")
         if not task_id:
-            logger.error("容器 %s 缺少 instanceServiceId，无法重启。", name)
+            logger.error("瀹瑰櫒 %s 缂哄皯 instanceServiceId锛屾棤娉曢噸鍚€?, name)
             return
 
-        logger.warning("尝试重启容器 %s (task id: %s)", name, task_id)
+        logger.warning("灏濊瘯閲嶅惎瀹瑰櫒 %s (task id: %s)", name, task_id)
         resp = self.container_client.restart_task(task_id)
         if str(resp.get("code")) == "0":
-            logger.info("重启请求成功: %s", resp)
+            logger.info("閲嶅惎璇锋眰鎴愬姛: %s", resp)
             self.state["last_restart"] = dt.datetime.utcnow()
             # exit monitor loop after successful restart request
             self._stop_requested = True
         else:
-            logger.error("重启请求失败: %s", resp)
+            logger.error("閲嶅惎璇锋眰澶辫触: %s", resp)
 
     def _parse_start_time(self, value: Optional[str]) -> Optional[dt.datetime]:
         if not value:
@@ -147,7 +147,7 @@ class ContainerManager:
 
         target_ip = self.state.get("container_ip") or ssh_cfg.get("container_ip")
         if not target_ip:
-            raise ValueError("容器 IP 未知，尚未捕获或配置。")
+            raise ValueError("瀹瑰櫒 IP 鏈煡锛屽皻鏈崟鑾锋垨閰嶇疆銆?)
 
         mode = (ssh_cfg.get("mode") or "jump").lower()
         target_user = ssh_cfg.get("target_user", "root")
@@ -205,7 +205,7 @@ class ContainerManager:
             cmd.append(f"{target_user}@{target_ip}")
 
         if password_login and password:
-            logger.info("检测到密码登录标记，请确保自动化安全处理密码输入。")
+            logger.info("妫€娴嬪埌瀵嗙爜鐧诲綍鏍囪锛岃纭繚鑷姩鍖栧畨鍏ㄥ鐞嗗瘑鐮佽緭鍏ャ€?)
         return cmd
 
     def build_tunnel_command(self) -> List[str]:
