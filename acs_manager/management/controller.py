@@ -57,11 +57,11 @@ class ContainerManager:
             logger.error("No container_name configured; cannot restart.")
             return
 
-        info = self.container_client.get_container_instance_info_by_name(name)
-        if not info:
+        task = self.container_client.find_instance_by_name(name)
+        if not task:
             logger.error("Container %s not found; cannot restart.", name)
             return
-        task_id = info.get("instanceServiceId") or info.get("id")
+        task_id = task.get("id") or task.get("instanceServiceId")
         if not task_id:
             logger.error("No task id for %s; cannot restart.", name)
             return

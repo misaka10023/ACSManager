@@ -114,11 +114,16 @@ class ContainerClient:
         return resp.json()
 
     def find_instance_by_name(self, name: str, *, start: int = 0, limit: int = 50) -> Optional[Dict[str, Any]]:
-        """Find first task matching the given name (instanceServiceName or notebook/task name)."""
+        """Find first task matching the given name (exact or contains/startswith)."""
+        target = name.strip().lower()
         data = self.list_tasks(start=start, limit=limit)
         for item in data.get("data", []):
             for key in ("instanceServiceName", "taskName", "notebookName", "name"):
-                if str(item.get(key, "")).strip().lower() == name.strip().lower():
+                cand = str(item.get(key, "")).strip()
+                cand_l = cand.lower()
+                if not cand:
+                    continue
+                if cand_l == target or target in cand_l or cand_l.startswith(target):
                     return item
         return None
 
