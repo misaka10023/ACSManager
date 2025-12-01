@@ -226,20 +226,6 @@ class ContainerManager:
             if default_remote and local_open_port and container_open_port:
                 base.extend(["-R", f"{container_open_port}:localhost:{local_open_port}"])
 
-        def add_remote_forwards(
-            base: List[str],
-            *,
-            default_remote: bool = False,
-        ) -> None:
-            reverse = ssh_cfg.get("reverse_forwards") or []
-            for spec in reverse:
-                local = spec.get("local")
-                remote = spec.get("remote")
-                if local and remote:
-                    base.extend(["-R", f"{remote}:localhost:{local}"])
-            if not reverse and default_remote and local_open_port and container_open_port:
-                base.extend(["-R", f"{container_open_port}:localhost:{local_open_port}"])
-
         def add_port(base: List[str], port_value: Any) -> None:
             if port_value:
                 base.extend(["-p", str(port_value)])
@@ -275,7 +261,6 @@ class ContainerManager:
             # 内层保持连接并在容器侧打开反向转发
             inner: List[str] = ["ssh", "-T", "-N"] + keepalive
             add_port(inner, ssh_cfg.get("container_port") or ssh_port)
-            add_remote_forwards(inner, default_remote=False)
             # 内层将容器端口指向跳板中间端口
             for spec in revs:
                 inner.extend(["-R", f"{spec['remote']}:localhost:{spec['mid']}"])
@@ -290,7 +275,6 @@ class ContainerManager:
                     raise ValueError("jump 模式需要 ssh.bastion_host 或 ssh.remote_server_ip。")
                 cmd.extend(["-J", f"{bastion_user}@{bastion_host}"])
             add_forwards(cmd, default_remote=False)
-            add_remote_forwards(cmd, default_remote=True)
             cmd.append(f"{target_user}@{target_ip}")
 
         if password_login and password:
