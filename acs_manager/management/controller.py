@@ -134,7 +134,18 @@ class ContainerManager:
         while not self._stop_requested:
             interval = slow_interval
             try:
-                info = self.container_client.get_container_instance_info_by_name(name)
+                try:
+                    info = self.container_client.get_container_instance_info_by_name(name)
+                except Exception as exc:
+                    # 如果是认证失败，尝试重新登录一次
+                    try:
+                        if hasattr(exc, "response") and getattr(exc.response, "status_code", None) == 401:  # type: ignore[attr-defined]
+                            self.container_client.login()
+                            info = self.container_client.get_container_instance_info_by_name(name)
+                        else:
+                            raise
+                    except Exception:
+                        raise
                 if info:
                     status = info.get("status")
                     start_time_str = info.get("startTime") or info.get("createTime")
@@ -344,8 +355,9 @@ class ContainerManager:
         ports: List[int],
         ssh_port: Optional[int],
         jump: Optional[str] = None,
+        allow_sudo: bool = True,
     ) -> None:
-        """在远端主机上强杀占用指定端口的进程（优先使用 sudo ss/fuser）。"""
+        """在远端主机上强杀占用指定端口的进程（优先使用 netstat，必要时 sudo）。"""
         if not host or not user or not ports:
             return
         cmd = ["ssh", "-T"]
@@ -357,7 +369,7 @@ class ContainerManager:
         cmd += ["bash", "-s"]
         plist = " ".join(str(p) for p in ports)
         script = """
-if command -v sudo >/dev/null 2>&1; then PREF="sudo -n"; else PREF=""; fi
+if command -v sudo >/dev/null 2>&1 && {use_sudo}; then PREF="sudo -n"; else PREF=""; fi
 for p in {plist}; do
   if command -v netstat >/dev/null 2>&1; then
     $PREF netstat -tnlp 2>/dev/null | awk -v port=":$p" '$4 ~ port"$" {{for(i=1;i<=NF;i++){{if($i~"/"){{split($i,a,"/"); print a[1]}}}}}}' | xargs -r $PREF kill -9
@@ -368,7 +380,7 @@ for p in {plist}; do
     $PREF fuser -k ${{p}}/tcp
   fi
 done
-""".format(plist=plist)
+""".format(plist=plist, use_sudo="true" if allow_sudo else "false")
         try:
             res = subprocess.run(
                 cmd,
@@ -433,6 +445,7 @@ done
                 ports=intermediate_ports,
                 ssh_port=ssh_port,
                 jump=None,
+                allow_sudo=False,
             )
         if target_ip and remote_ports:
             jump = f"{bastion_user}@{bastion_host}" if bastion_host and mode in {"jump", "double"} else None
@@ -442,6 +455,7 @@ done
                 ports=remote_ports,
                 ssh_port=container_port,
                 jump=jump,
+                allow_sudo=True,
             )
 
     def _reverse_specs(self, ssh_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -484,6 +498,14 @@ done
             try:
                 ssh_cfg = self._ssh_cfg(reload=True)
                 target_ip = self.state.get("container_ip") or ssh_cfg.get("container_ip")
+                if not target_ip:
+                    try:
+                        self.container_client.login()
+                    except Exception as exc:
+                        logger.error("获取容器 IP 前登录失败: %s", exc)
+                    target_ip = self.state.get("container_ip") or self.resolve_container_ip(force_login=False) or self.resolve_container_ip(force_login=True)
+                    if not target_ip:
+                        raise ValueError("容器 IP 未知，无法启动隧道。")
                 reverse_specs = self._reverse_specs(ssh_cfg)
                 ports = self._forward_ports(ssh_cfg)
                 # 远程反向转发端口预清理（容器端 & 跳板中间端口）
