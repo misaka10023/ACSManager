@@ -21,24 +21,40 @@ class LoginResult:
 
 class ContainerClient:
     """
-    Minimal ACS container client:
-    - login with RSA PKCS1 password encryption
-    - reuse configured cookies when present
-    - fetch container list and IP data via instance-service API
+    ACS API 客户端：登录、任务列表、容器 IP/状态查询与重启。
+    - 支持配置里的 Cookie 直连；若为空则按公钥加密密码登录
+    - 仅使用配置给出的 base_url 与 api_prefix 拼 URL（不再猜测）
+    - 通过 instance-service 任务列表、run-ips、container-monitor 获取信息
     """
 
     def __init__(self, store: ConfigStore) -> None:
         self.store = store
         self.session = requests.Session()
-        cfg = self._acs_cfg()
-        self.base_url = cfg.get("base_url", "").rstrip("/")
-        self.api_prefix = (cfg.get("api_prefix") or "").rstrip("/")
-        self.session.verify = cfg.get("verify_ssl", True)
-        if not self.session.verify:
-            requests.packages.urllib3.disable_warnings()  # type: ignore
+        self.base_url = ""
+        self.api_prefix = ""
+        self._apply_cfg()
 
     def _acs_cfg(self, reload: bool = False) -> Dict[str, Any]:
         return self.store.get_section("acs", default={}, reload=reload)
+
+    def _apply_cfg(self, reload: bool = False) -> Dict[str, Any]:
+        """从配置加载 base_url / api_prefix / verify_ssl。"""
+        cfg = self._acs_cfg(reload=reload)
+        self.base_url = (cfg.get("base_url") or "").rstrip("/")
+        self.api_prefix = self._normalize_prefix(cfg.get("api_prefix") or "")
+        self.session.verify = cfg.get("verify_ssl", True)
+        if not self.session.verify:
+            requests.packages.urllib3.disable_warnings()  # type: ignore
+        return cfg
+
+    @staticmethod
+    def _normalize_prefix(prefix: str) -> str:
+        prefix = prefix.strip()
+        if not prefix:
+            return ""
+        if not prefix.startswith("/"):
+            prefix = "/" + prefix
+        return prefix.rstrip("/")
 
     def _encrypt_password(self, password: str, public_key_b64: str) -> str:
         pem = (
@@ -56,33 +72,36 @@ class ContainerClient:
             self.session.cookies.set(k, v)
 
     def _url(self, path: str) -> str:
-        prefix = f"{self.api_prefix}" if self.api_prefix else ""
-        if prefix and not prefix.startswith("/"):
-            prefix = "/" + prefix
-        return f"{self.base_url}{prefix}{path}"
+        if not path.startswith("/"):
+            path = "/" + path
+        if not self.base_url:
+            raise ValueError("未配置 acs.base_url，无法构建请求 URL。")
+        base = self.base_url.rstrip("/")
+        prefix = self.api_prefix
+        # 若 base_url 已包含相同前缀则不重复拼接
+        if prefix and base.endswith(prefix.lstrip("/")):
+            prefix = ""
+        return f"{base}{prefix}{path}"
 
     def login(self, auth_code: str = "") -> LoginResult:
-        cfg = self._acs_cfg(reload=True)
+        cfg = self._apply_cfg(reload=True)
         username = cfg.get("login_user", "")
         password = cfg.get("login_password", "")
         user_type = cfg.get("user_type", "os")
         public_key_b64 = cfg.get("public_key", "")
-        preset_cookies = cfg.get("cookies", {}) or {}
-        self.session.verify = cfg.get("verify_ssl", True)
-        self.api_prefix = (cfg.get("api_prefix") or "").rstrip("/")
-        if not self.session.verify:
-            requests.packages.urllib3.disable_warnings()  # type: ignore
+        preset_cookies = {k: v for k, v in (cfg.get("cookies", {}) or {}).items() if v}
 
         if preset_cookies:
             # 直接复用配置中的 Cookie
+            self.session.cookies.clear()
             self._seed_cookies(preset_cookies)
             return LoginResult(True, None, self.session.cookies.get_dict(), {"msg": "use preset cookies"})
 
         if not username or not password or not public_key_b64 or not self.base_url:
-            raise ValueError("缺少 ACS 登录配置（用户名/密码/公钥/base_url）")
+            raise ValueError("缺少 ACS 登录配置（用户名/密码/公钥/base_url）。")
 
-        # 预热 session
-        self.session.get(self._url("/login.html"))
+        # 预热 session（使用实际登录页）
+        self.session.get(self._url("/login/loginPage.action"))
 
         enc_pwd = self._encrypt_password(password, public_key_b64)
         payload = {
@@ -104,34 +123,32 @@ class ContainerClient:
         )
 
     def get_cookies(self) -> Dict[str, str]:
-        """Return current session cookies."""
+        """返回当前 session cookies。"""
         return self.session.cookies.get_dict()
 
-    def get_instance_ips(self, instance_id: str) -> Dict[str, Any]:
-        """
-        Fetch instance IP information via instance-service.
-        """
-        url = self._url(f"/api/instance-service/{instance_id}/run-ips")
-        resp = self.session.get(url)
-        resp.raise_for_status()
-        return resp.json()
-
-    def list_tasks(self, start: int = 0, limit: int = 50, sort: str = "DESC") -> Dict[str, Any]:
-        """List container tasks (instance-service task endpoint)."""
+    def list_tasks(self, start: int = 0, limit: int = 20, sort: str = "DESC") -> Dict[str, Any]:
+        """获取任务列表（/sothisai/api/instance-service/task）。"""
         url = self._url("/api/instance-service/task")
         resp = self.session.get(url, params={"start": start, "limit": limit, "sort": sort})
         resp.raise_for_status()
         return resp.json()
 
     def get_run_ips(self, instance_service_id: str) -> Dict[str, Any]:
-        """Fetch run-ips by instance service id."""
+        """通过 run-ips 获取容器 IP 列表。"""
         url = self._url(f"/api/instance-service/{instance_service_id}/run-ips")
         resp = self.session.get(url)
         resp.raise_for_status()
         return resp.json()
 
+    def get_container_monitor(self, instance_service_id: str) -> Dict[str, Any]:
+        """获取容器运行状态详情（container-monitor 接口）。"""
+        url = self._url(f"/api/instance/{instance_service_id}/container-monitor")
+        resp = self.session.get(url)
+        resp.raise_for_status()
+        return resp.json()
+
     def find_instance_by_name(self, name: str, *, start: int = 0, limit: int = 50) -> Optional[Dict[str, Any]]:
-        """Find first task matching the given name (exact or contains/startswith)."""
+        """按名称匹配任务，返回第一条匹配记录。"""
         target = name.strip().lower()
         data = self.list_tasks(start=start, limit=limit)
         for item in data.get("data", []):
@@ -145,28 +162,37 @@ class ContainerClient:
         return None
 
     def get_container_instance_info_by_name(self, name: str) -> Optional[Dict[str, Any]]:
-        """Resolve container info (first run-ips record) by service/task name."""
+        """按任务/容器名获取详情，优先 container-monitor，缺失 IP 时再查 run-ips。"""
         task = self.find_instance_by_name(name)
         if not task:
             return None
-        service_id = task.get("id") or task.get("instanceServiceId")
+        service_id = task.get("instanceServiceId") or task.get("id")
         if not service_id:
             return None
-        run_ips = self.get_run_ips(service_id)
-        ips = run_ips.get("data") or []
-        return ips[0] if ips else None
+        monitor = self.get_container_monitor(service_id)
+        info: Optional[Dict[str, Any]] = None
+        if isinstance(monitor, dict):
+            if isinstance(monitor.get("data"), dict):
+                info = monitor["data"]
+            elif monitor:
+                info = monitor
+        if not info:
+            return None
+        if not info.get("instanceIp"):
+            run_ips = self.get_run_ips(service_id)
+            ips = run_ips.get("data") or []
+            if ips:
+                info["instanceIp"] = ips[0].get("instanceIp")
+        info["instanceServiceId"] = service_id
+        return info
 
     def get_container_ip_by_name(self, name: str) -> Optional[str]:
-        """
-        Look up container by service/task name and return its instanceIp if available.
-        """
+        """按名称获取容器 IP。"""
         info = self.get_container_instance_info_by_name(name)
         return info.get("instanceIp") if info else None
 
     def restart_task(self, task_id: str) -> Dict[str, Any]:
-        """
-        Call restart API for a task/instance.
-        """
+        """调用重启接口 /api/instance-service/task/actions/restart。"""
         url = self._url("/api/instance-service/task/actions/restart")
         resp = self.session.post(url, json={"id": task_id})
         resp.raise_for_status()

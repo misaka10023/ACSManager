@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional
@@ -91,18 +91,21 @@ def container_ip() -> dict:
     if manager is None:
         raise HTTPException(status_code=503, detail="Manager not wired to web UI yet")
     ip = manager.snapshot().get("container_ip")
+    source = "captured"
     if not ip:
-        # 灏濊瘯鐢ㄩ厤缃腑鐨勫洖閫€鍊?        fallback = None
-        if config_store:
+        try:
+            ip = manager.resolve_container_ip(force_login=True)
+            source = "api"
+        except Exception:
+            ip = None
+        if not ip and config_store:
             settings = config_store.read(reload=True)
-            fallback = (
-                settings.get("ssh", {}).get("container_ip")
-                or settings.get("acs", {}).get("container_ip_hint")
-            )
-        if not fallback:
+            fallback = settings.get("ssh", {}).get("container_ip")
+            if fallback:
+                return {"container_ip": fallback, "source": "fallback"}
+        if not ip:
             raise HTTPException(status_code=404, detail="Container IP not available yet")
-        return {"container_ip": fallback, "source": "fallback"}
-    return {"container_ip": ip, "source": "captured"}
+    return {"container_ip": ip, "source": source}
 
 
 @app.get("/config")

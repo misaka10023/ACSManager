@@ -1,40 +1,40 @@
-﻿# ACS 管理器配置示例（所有字段均含中文说明）
+# ACS 管理器配置示例（所有字段均含中文说明）
 
 acs:
-  base_url: "https://acs.example.com"          # ACS 控制台地址
-  api_prefix: "/sothisai"                      # API 前缀，如果无则留空
-  login_user: "your-acs-username"              # 登录用户名
-  login_password: "change-me"                  # 登录密码
-  user_type: "os"                              # 登录用户类型（前端下拉：os/gridview 等）
-  public_key: "MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBALaXEnbjI6fjy+t9W9AiO/KS0q+b/OZFS+7ykinLbiriUx9P8BcuuHnVbXNiZp5jW70eVGBtX4DhGUPzJa1YT/8CAwEAAQ=="  # 登录密码加密公钥（Base64），一般不用改
-  verify_ssl: true                             # 如为自签名证书可设为 false
-  cookies:                                     # 预置的 JSESSIONID/GV_JSESSIONID（可选；为空则自动登录获取）
+  base_url: "http://192.168.10.200:6080"   # ACS 控制台基础地址；默认使用 http:6080，若启用 https 请自行调整
+  api_prefix: "/sothisai"                  # API 前缀，最终拼出 /sothisai/api/...
+  login_user: "your-acs-username"          # 登录用户名
+  login_password: "change-me"              # 登录密码
+  user_type: "os"                          # 登录用户类型（前端下拉：os/gridview 等）
+  public_key: "MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBALaXEnbjI6fjy+t9W9AiO/KS0q+b/OZFS+7ykinLbiriUx9P8BcuuHnVbXNiZp5jW70eVGBtX4DhGUPzJa1YT/8CAwEAAQ=="  # 登录密码加密公钥（Base64）
+  verify_ssl: false                        # 如为自签名证书可设为 false
+  cookies:                                 # 预置 JSESSIONID / GV_JSESSIONID（可选；为空则自动登录获取）
     JSESSIONID: ""
     GV_JSESSIONID: ""
-  container_name: "acs-container"              # 容器名称（如 E2SRLF）c
+  container_name: "E2SRLF"                 # 登录后列表显示的容器/任务名称
 
 ssh:
-  mode: "jump"                                 # ssh 模式：direct(直连) | jump(-J) | double(两段 ssh)
-  remote_server_ip: "203.0.113.10"             # 跳板机/远程服务器 IP（direct 模式可留空）
-  bastion_host: "bastion.example.com"          # -J 使用的跳板主机（direct 模式可留空）
-  bastion_user: "bastion"                      # 跳板登录用户（direct 模式可留空）
-  target_user: "root"                          # 容器主机登录用户
-  port: 22                                      # 外层/默认 ssh 端口
-  container_port: 22                            # 内层 ssh 端口（double 模式），未设则使用 port
-  password_login: false                         # true 使用密码登录；false 使用密钥
-  password: "change-me"                        # 密码登录密码（生产环境请替换）
-  identity_file: "~/.ssh/id_ed25519"           # 私钥路径（密钥登录）
-  local_open_port: 7890                         # 本地端口（本地代理软件监听）
-  container_open_port: 7890                     # 容器内监听端口（需容器开放）
-  forwards:                                     # 额外转发列表，remote 为容器端口
+  mode: "jump"                             # ssh 模式：direct(直连容器) | jump(-J 跳板) | double(双层 ssh)
+  remote_server_ip: ""                     # 跳板机/远程服务器 IP（direct 模式可留空）
+  bastion_host: ""                         # -J 使用的跳板主机（direct 模式可留空）
+  bastion_user: ""                         # 跳板登录用户（direct 模式可留空）
+  target_user: "root"                      # 容器主机登录用户
+  port: 22                                 # 默认 ssh 端口（外层/单层）
+  container_port: 22                       # 双层 ssh 内层端口；不填则沿用 port
+  password_login: false                    # true 使用密码登录；false 使用密钥
+  password: ""                             # 密码登录密码（生产环境请替换）
+  identity_file: "~/.ssh/id_ed25519"       # 私钥路径（密钥登录）
+  local_open_port: 7890                    # 本地端口（本地代理软件监听）
+  container_open_port: 7890                # 容器内监听端口
+  forwards:                                # 额外转发列表，remote 为容器端口
     - local: 7891
       remote: 7892
     - local: 8022
       remote: 22
 
 webui:
-  host: "0.0.0.0"                              # Web UI 绑定地址
-  port: 8000                                    # Web UI 端口
+  host: "0.0.0.0"                          # Web UI 绑定地址
+  port: 8000                               # Web UI 端口
 
 logging:
-  level: INFO                                   # 日志级别 (DEBUG/INFO/WARNING/ERROR)
+  level: INFO                              # 日志级别 (DEBUG/INFO/WARNING/ERROR)

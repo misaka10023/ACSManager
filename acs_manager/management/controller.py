@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class ContainerManager:
-    """Handle ACS container lifecycle, IP tracking, and SSH composition/maintenance."""
+    """处理 ACS 容器生命周期、IP 跟踪与 SSH 隧道维护。"""
 
     def __init__(self, store: ConfigStore, container_client: Optional[ContainerClient] = None) -> None:
         self.store = store
@@ -36,10 +36,10 @@ class ContainerManager:
         self._tunnel_started_once = False
 
     async def handle_new_ip(self, ip: str) -> None:
-        """Update state when the sniffer reports a fresh IP and restart tunnel."""
+        """捕获到新 IP 时更新状态并重启隧道。"""
         self.state["container_ip"] = ip
         self.state["last_seen"] = dt.datetime.utcnow()
-        logger.info("Container IP updated to %s", ip)
+        logger.info("容器 IP 更新为 %s", ip)
         await self.restart_tunnel()
 
     def update_container_status(self, status: Optional[str], start_time: Optional[str]) -> None:
@@ -47,40 +47,48 @@ class ContainerManager:
         self.state["container_start_time"] = start_time
 
     def resolve_container_ip(self, *, force_login: bool = True) -> Optional[str]:
-        """Auto-fetch container IP via API when missing."""
+        """在 IP 不明时通过 API 自动获取。"""
         name = self._acs_cfg(reload=True).get("container_name")
         if not name:
-            logger.warning("未配置 container_name，无法自动获取 IP。")
+            logger.warning("未配置 acs.container_name，无法自动获取 IP。")
             return None
         if force_login:
             try:
                 self.container_client.login()
-            except Exception as exc:  # pragma: no cover - network errors
+            except Exception as exc:  # pragma: no cover - 网络异常
                 logger.error("自动登录以获取容器 IP 失败: %s", exc)
                 return None
-        info = self.container_client.get_container_instance_info_by_name(name)
+        try:
+            info = self.container_client.get_container_instance_info_by_name(name)
+        except Exception as exc:  # pragma: no cover - 网络异常
+            logger.error("通过 API 获取容器 %s 信息失败: %s", name, exc)
+            return None
         if info and info.get("instanceIp"):
             ip = info["instanceIp"]
             self.state["container_ip"] = ip
             self.state["last_seen"] = dt.datetime.utcnow()
-            logger.info("自动获取容器 IP: %s", ip)
+            logger.info("通过 API 自动获取容器 IP: %s", ip)
             return ip
         logger.warning("无法通过 API 获取容器 %s 的 IP。", name)
         return None
 
     async def ensure_running(self) -> None:
-        """Entry point to be called when the capture layer detects a shutdown."""
+        """捕获到关闭时调用，立即尝试重启。"""
         await self.restart_container()
 
     async def restart_container(self) -> None:
-        """Restart container via ACS restart API."""
+        """调用 ACS 重启接口。"""
         acs_cfg = self._acs_cfg(reload=True)
         name = acs_cfg.get("container_name")
         if not name:
-            logger.error("未配置 container_name，无法重启。")
+            logger.error("未配置 acs.container_name，无法重启。")
             return
 
-        task = self.container_client.find_instance_by_name(name)
+        try:
+            task = self.container_client.find_instance_by_name(name)
+        except Exception as exc:
+            logger.error("查询容器 %s 失败，无法重启: %s", name, exc)
+            return
         if not task:
             logger.error("未找到容器 %s，无法重启。", name)
             return
@@ -90,7 +98,11 @@ class ContainerManager:
             return
 
         logger.warning("尝试重启容器 %s (task id: %s)", name, task_id)
-        resp = self.container_client.restart_task(task_id)
+        try:
+            resp = self.container_client.restart_task(task_id)
+        except Exception as exc:
+            logger.error("调用重启接口失败: %s", exc)
+            return
         if str(resp.get("code")) == "0":
             logger.info("重启请求成功: %s", resp)
             self.state["last_restart"] = dt.datetime.utcnow()
@@ -110,12 +122,12 @@ class ContainerManager:
 
     async def monitor_container(self, *, pre_shutdown_minutes: int = 10, slow_interval: int = 300, fast_interval: int = 30) -> None:
         """
-        Periodically check container status; restart if stopped near shutdown window.
+        周期检查容器状态；接近超时时缩短检查间隔，停止时立即重启。
         """
         acs_cfg = self._acs_cfg(reload=True)
         name = acs_cfg.get("container_name")
         if not name:
-            logger.warning("未配置 container_name，监控退出。")
+            logger.warning("未配置 acs.container_name，监控退出。")
             return
 
         while not self._stop_requested:
@@ -143,13 +155,13 @@ class ContainerManager:
                             interval = slow_interval
 
                     if status and status.lower() in {"terminated", "stopped", "stop", "failed"}:
-                        logger.warning("容器 %s 状态 %s，触发重启。", name, status)
+                        logger.warning("容器 %s 状态为 %s，触发重启。", name, status)
                         await self.restart_container()
                         break
                 else:
                     logger.warning("容器 %s 未找到，将快速重试。", name)
                     interval = fast_interval
-            except Exception as exc:  # pragma: no cover - network/API errors
+            except Exception as exc:  # pragma: no cover - 网络/API 异常
                 logger.error("监控循环异常: %s", exc)
                 interval = fast_interval
 
@@ -157,12 +169,10 @@ class ContainerManager:
 
     def build_ssh_command(self, *, reload_config: bool = True) -> List[str]:
         """
-        Compose the ssh command.
-
-        Supports three modes via config:
-        - direct: simple ssh to the container.
-        - jump: use ProxyJump (-J).
-        - double: two-hop ssh (ssh bastion ... ssh container ...).
+        组装 ssh 命令：
+        - direct：直连容器
+        - jump：使用 -J 跳板
+        - double：双层 ssh（外层到跳板，内层到容器）
         """
         ssh_cfg = self._ssh_cfg(reload=reload_config)
         acs_cfg = self._acs_cfg(reload=reload_config)
@@ -204,7 +214,7 @@ class ContainerManager:
 
         if mode == "double":
             if not bastion_host:
-                raise ValueError("double 模式需要 ssh.bastion_host 或 ssh.remote_server_ip")
+                raise ValueError("double 模式需要 ssh.bastion_host 或 ssh.remote_server_ip。")
             outer: List[str] = ["ssh"]
             add_identity(outer)
             add_port(outer, ssh_port)
@@ -222,7 +232,7 @@ class ContainerManager:
             add_identity(cmd)
             if mode == "jump":
                 if not bastion_host:
-                    raise ValueError("jump 模式需要 ssh.bastion_host 或 ssh.remote_server_ip")
+                    raise ValueError("jump 模式需要 ssh.bastion_host 或 ssh.remote_server_ip。")
                 cmd.extend(["-J", f"{bastion_user}@{bastion_host}"])
             add_forwards(cmd)
             cmd.append(f"{target_user}@{target_ip}")
@@ -232,12 +242,12 @@ class ContainerManager:
         return cmd
 
     def build_tunnel_command(self) -> List[str]:
-        """Return ssh command for a persistent tunnel with port forwarding."""
+        """生成带端口转发的 ssh 隧道命令。"""
         base = self.build_ssh_command()
         return ["ssh", "-o", "ExitOnForwardFailure=yes", "-N"] + base[1:]
 
     def _forward_ports(self, ssh_cfg: Dict[str, Any]) -> List[int]:
-        """Collect local ports that will be bound by SSH forwards."""
+        """收集需要监听的本地端口。"""
         ports: List[int] = []
         forwards = ssh_cfg.get("forwards") or []
         for spec in forwards:
@@ -251,7 +261,7 @@ class ContainerManager:
         return ports
 
     def _ports_available(self, ports: List[int]) -> bool:
-        """Check local port availability by attempting bind."""
+        """尝试绑定端口以检查占用。"""
         import socket
 
         for p in ports:
@@ -259,12 +269,12 @@ class ContainerManager:
                 try:
                     s.bind(("127.0.0.1", p))
                 except OSError:
-                    logger.error("本地端口 %s 已被占用，尝试自动清理/重试。", p)
+                    logger.error("本地端口 %s 已被占用，尝试自动清理后重试。", p)
                     return False
         return True
 
     def _kill_ssh_on_ports(self, ports: List[int]) -> None:
-        """Force-kill ssh processes of current user occupying given ports."""
+        """强杀占用端口的当前用户 ssh 进程。"""
         current_user = getpass.getuser()
         targets: List[int] = []
         for conn in psutil.net_connections(kind="inet"):
@@ -290,9 +300,7 @@ class ContainerManager:
                 continue
 
     async def _ensure_ports_free(self, ports: List[int], retries: int = 3, delay: float = 1.0) -> bool:
-        """
-        Retry freeing ports (by ensuring our own tunnel is stopped) before giving up.
-        """
+        """在隧道重连时，重试释放端口后再启动。"""
         for attempt in range(retries):
             if self._ports_available(ports):
                 return True
@@ -303,7 +311,7 @@ class ContainerManager:
         return self._ports_available(ports)
 
     async def start_tunnel(self) -> None:
-        """Start the SSH tunnel process if not already running."""
+        """启动 SSH 隧道（若未运行）。"""
         async with self._proc_lock:
             if self._tunnel_process and self._tunnel_process.returncode is None:
                 return
@@ -316,18 +324,18 @@ class ContainerManager:
                         self.state["tunnel_status"] = "error"
                         return
             except Exception as exc:
-                logger.error("Cannot build tunnel command: %s", exc)
+                logger.error("无法构建隧道命令: %s", exc)
                 self.state["tunnel_status"] = "error"
                 return
 
-            logger.info("Starting SSH tunnel: %s", " ".join(cmd))
+            logger.info("启动 SSH 隧道: %s", " ".join(cmd))
             proc = await asyncio.create_subprocess_exec(*cmd)
             self._tunnel_process = proc
             self.state["tunnel_status"] = "running"
             self._tunnel_started_once = True
 
     async def stop_tunnel(self) -> None:
-        """Stop the SSH tunnel process and ensure port cleanup."""
+        """停止隧道并清理状态。"""
         async with self._proc_lock:
             proc = self._tunnel_process
             if not proc:
@@ -343,12 +351,12 @@ class ContainerManager:
             self._tunnel_process = None
 
     async def restart_tunnel(self) -> None:
-        """Restart tunnel to refresh forwarding and clean up ports."""
+        """重启隧道以刷新转发并清理端口。"""
         await self.stop_tunnel()
         await self.start_tunnel()
 
     async def maintain_tunnel(self) -> None:
-        """Keep the SSH tunnel alive; restart on exit or errors."""
+        """保持隧道存活，异常退出后自动重启。"""
         while not self._stop_requested:
             await self.start_tunnel()
             proc = self._tunnel_process
@@ -357,20 +365,20 @@ class ContainerManager:
                 continue
             try:
                 rc = await proc.wait()
-                logger.warning("SSH tunnel exited with code %s; restarting soon.", rc)
-            except Exception as exc:  # pragma: no cover - subprocess errors
-                logger.error("SSH tunnel crashed: %s", exc)
+                logger.warning("SSH 隧道退出码 %s；稍后重启。", rc)
+            except Exception as exc:  # pragma: no cover - 子进程异常
+                logger.error("SSH 隧道崩溃: %s", exc)
             finally:
                 await self.stop_tunnel()
             await asyncio.sleep(3)
 
     async def shutdown(self) -> None:
-        """Signal loop to stop and clean up the tunnel."""
+        """通知循环退出并关闭隧道。"""
         self._stop_requested = True
         await self.stop_tunnel()
 
     def snapshot(self) -> Dict[str, Any]:
-        """Return a shallow copy of current state for the web UI."""
+        """获取当前状态（供 Web UI 展示）。"""
         return dict(self.state)
 
     def _acs_cfg(self, *, reload: bool = False) -> Dict[str, Any]:
