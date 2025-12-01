@@ -49,12 +49,12 @@
             meta.textContent = `预计自动停止时间: ${data.next_shutdown}`;
           }
         } else {
-          meta.textContent = "";
+          meta.textContent = "暂未获取到自动停止/重启时间";
         }
       }
     } catch (e) {
       el.textContent = e.toString();
-      if (meta) meta.textContent = "";
+      if (meta) meta.textContent = "获取状态失败，无法计算剩余时间";
     }
   }
 
