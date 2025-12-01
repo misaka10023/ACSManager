@@ -5,6 +5,9 @@ import datetime as dt
 import logging
 from asyncio.subprocess import Process
 from typing import Any, Dict, List, Optional
+import getpass
+
+import psutil
 
 from acs_manager.config.store import ConfigStore
 from acs_manager.container.client import ContainerClient
@@ -241,6 +244,32 @@ class ContainerManager:
                     return False
         return True
 
+    def _kill_ssh_on_ports(self, ports: List[int]) -> None:
+        """Force-kill ssh processes of current user occupying given ports."""
+        current_user = getpass.getuser()
+        targets: List[int] = []
+        for conn in psutil.net_connections(kind="inet"):
+            if conn.laddr and conn.laddr.port in ports and conn.status == psutil.CONN_LISTEN:
+                if conn.pid is None:
+                    continue
+                try:
+                    proc = psutil.Process(conn.pid)
+                    if "ssh" in proc.name().lower() and proc.username() == current_user:
+                        targets.append(proc.pid)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        for pid in targets:
+            try:
+                proc = psutil.Process(pid)
+                logger.warning("强制结束占用端口的 ssh 进程 pid=%s", pid)
+                proc.terminate()
+                try:
+                    proc.wait(timeout=2)
+                except psutil.TimeoutExpired:
+                    proc.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
     async def _ensure_ports_free(self, ports: List[int], retries: int = 3, delay: float = 1.0) -> bool:
         """
         Retry freeing ports (by ensuring我们自己的隧道已停) before giving up.
@@ -250,6 +279,8 @@ class ContainerManager:
                 return True
             # 尝试停止已有隧道，等待端口释放
             await self.stop_tunnel()
+            # 强杀当前用户占用端口的 ssh
+            self._kill_ssh_on_ports(ports)
             if attempt < retries - 1:
                 await asyncio.sleep(delay)
         return self._ports_available(ports)
