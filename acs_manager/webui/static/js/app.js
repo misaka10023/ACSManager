@@ -25,12 +25,36 @@
 
   async function loadState() {
     const el = document.getElementById("state-block");
+    const meta = document.getElementById("health-meta");
     if (!el) return;
     try {
       const data = await fetchJSON("/state");
       el.textContent = JSON.stringify(data, null, 2);
+      if (meta) {
+        if (data.next_shutdown) {
+          const ts = Date.parse(data.next_shutdown);
+          if (!Number.isNaN(ts)) {
+            const now = Date.now();
+            const diffSec = Math.max(0, Math.floor((ts - now) / 1000));
+            const mins = Math.floor(diffSec / 60);
+            const hours = Math.floor(mins / 60);
+            let human = "";
+            if (hours > 0) {
+              human = `${hours} 小时 ${mins % 60} 分钟`;
+            } else {
+              human = `${mins} 分钟`;
+            }
+            meta.textContent = `预计自动停止时间: ${data.next_shutdown}（约剩余 ${human}）`;
+          } else {
+            meta.textContent = `预计自动停止时间: ${data.next_shutdown}`;
+          }
+        } else {
+          meta.textContent = "";
+        }
+      }
     } catch (e) {
       el.textContent = e.toString();
+      if (meta) meta.textContent = "";
     }
   }
 

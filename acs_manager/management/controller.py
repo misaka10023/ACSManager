@@ -25,6 +25,8 @@ class ContainerManager:
         self.container_client = container_client or ContainerClient(store)
         self.state: Dict[str, Any] = {
             "container_ip": None,
+            "next_shutdown": None,
+            "remaining_seconds": None,
             "last_restart": None,
             "last_seen": None,
             "tunnel_status": "stopped",
@@ -175,10 +177,15 @@ class ContainerManager:
                             hours, minutes, seconds = info["timeoutLimit"].split(":")
                             delta = dt.timedelta(hours=int(hours), minutes=int(minutes), seconds=int(seconds))
                             next_shutdown = start_dt + delta
+                            self.state["next_shutdown"] = next_shutdown
                             threshold = next_shutdown - dt.timedelta(minutes=pre_shutdown_minutes)
                             now = dt.datetime.utcnow()
+                            remaining = (next_shutdown - now).total_seconds()
+                            self.state["remaining_seconds"] = int(remaining) if remaining > 0 else 0
                             interval = fast_interval if now >= threshold else slow_interval
                         except Exception:
+                            self.state["next_shutdown"] = None
+                            self.state["remaining_seconds"] = None
                             interval = slow_interval
 
                     status_norm = (status or "").lower()
