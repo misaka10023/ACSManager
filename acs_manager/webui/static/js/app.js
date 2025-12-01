@@ -1,6 +1,35 @@
 (() => {
   const page = document.body.getAttribute("data-page");
 
+  function formatDateTimeStr(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const pad = (n) => String(n).padStart(2, "0");
+    const y = d.getFullYear();
+    const m = pad(d.getMonth() + 1);
+    const day = pad(d.getDate());
+    const hh = pad(d.getHours());
+    const mm = pad(d.getMinutes());
+    const ss = pad(d.getSeconds());
+    return `${y}-${m}-${day} ${hh}:${mm}:${ss}`;
+  }
+
+  function formatAgo(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (diffSec < 0) return "";
+    if (diffSec < 60) return `${diffSec} 秒前`;
+    const mins = Math.floor(diffSec / 60);
+    if (mins < 60) return `${mins} 分钟前`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours} 小时前`;
+    const days = Math.floor(hours / 24);
+    return `${days} 天前`;
+  }
+
   async function fetchJSON(url, options) {
     const res = await fetch(url, options);
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -46,9 +75,10 @@
             } else {
               human = `${mins} 分钟`;
             }
-            meta.textContent = `预计自动停止时间: ${data.next_shutdown}（约剩余 ${human}）`;
+            const pretty = formatDateTimeStr(data.next_shutdown);
+            meta.textContent = `预计自动停止时间: ${pretty}（约剩余 ${human}）`;
           } else {
-            meta.textContent = `预计自动停止时间: ${data.next_shutdown}`;
+            meta.textContent = `预计自动停止时间: ${formatDateTimeStr(data.next_shutdown)}`;
           }
         } else {
           meta.textContent = "暂未获取到自动停止/重启时间";
@@ -67,7 +97,13 @@
     try {
       const data = await fetchJSON("/container-ip");
       valEl.textContent = data.ip || data.container_ip || "未知";
-      metaEl.textContent = `来源: ${data.source || "unknown"}${data.updated_at ? " · 更新时间: " + data.updated_at : ""}`;
+      const parts = [`来源: ${data.source || "unknown"}`];
+      if (data.updated_at) {
+        const pretty = formatDateTimeStr(data.updated_at);
+        const ago = formatAgo(data.updated_at);
+        parts.push(`更新时间: ${pretty}${ago ? `（${ago}）` : ""}`);
+      }
+      metaEl.textContent = parts.join(" · ");
     } catch (e) {
       valEl.textContent = "未获取";
       metaEl.textContent = e.toString();
