@@ -345,7 +345,7 @@ class ContainerManager:
         ssh_port: Optional[int],
         jump: Optional[str] = None,
     ) -> None:
-        """在远端主机上强杀占用指定端口的进程（依赖 ssh、ss 或 fuser）。"""
+        """在远端主机上强杀占用指定端口的进程（优先使用 sudo ss/fuser）。"""
         if not host or not user or not ports:
             return
         cmd = ["ssh", "-T"]
@@ -358,22 +358,27 @@ class ContainerManager:
         plist = " ".join(str(p) for p in ports)
         script = f"""
 for p in {plist}; do
+  if command -v sudo >/dev/null 2>&1; then PREF="sudo -n"; else PREF=""; fi
   if command -v ss >/dev/null 2>&1; then
-    ss -ltnp | grep ":$p" | awk -F'pid=' '{{print $2}}' | awk '{{print $1}}' | tr -d ',' | xargs -r kill -9
-  elif command -v fuser >/dev/null 2>&1; then
-    fuser -k ${{p}}/tcp
+    $PREF ss -ltnp | grep ":$p" | awk -F'pid=' '{{print $2}}' | awk '{{print $1}}' | tr -d ',' | xargs -r $PREF kill -9
+  fi
+  if command -v fuser >/dev/null 2>&1; then
+    $PREF fuser -k ${{p}}/tcp
   fi
 done
 """
         try:
-            subprocess.run(
+            res = subprocess.run(
                 cmd,
                 input=script.encode("utf-8"),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 check=False,
             )
-        except Exception:
+            if res.returncode != 0:
+                logger.debug("远端端口清理返回码 %s: %s", res.returncode, res.stderr.decode(errors="ignore"))
+        except Exception as exc:
+            logger.debug("远端端口清理失败: %s", exc)
             return
 
     def _remote_cleanup_ports(self, ports: List[int]) -> None:
@@ -478,6 +483,7 @@ done
                 remote_ports = [spec["remote"] for spec in reverse_specs if spec.get("remote")]
                 intermediate_ports = [spec["mid"] for spec in reverse_specs if spec.get("mid")]
                 if reverse_specs:
+                    logger.info("尝试清理远端端口: container=%s, intermediate=%s", remote_ports, intermediate_ports)
                     self._reverse_cleanup_ports(remote_ports, intermediate_ports, ssh_cfg, target_ip)
                 # 每次启动前都确保端口可用，并尝试清理同用户的 ssh 占用
                 if ports and not await self._ensure_ports_free(ports):
