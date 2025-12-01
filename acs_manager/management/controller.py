@@ -195,14 +195,14 @@ class ContainerManager:
         local_open_port = ssh_cfg.get("local_open_port")
         container_open_port = ssh_cfg.get("container_open_port")
 
-        def add_forwards(base: List[str]) -> None:
+        def add_forwards(base: List[str], remote_host: str = "localhost") -> None:
             for spec in forwards:
                 local = spec.get("local")
                 remote = spec.get("remote")
                 if local and remote:
-                    base.extend(["-L", f"{local}:localhost:{remote}"])
+                    base.extend(["-L", f"{local}:{remote_host}:{remote}"])
             if not forwards and local_open_port and container_open_port:
-                base.extend(["-L", f"{local_open_port}:localhost:{container_open_port}"])
+                base.extend(["-L", f"{local_open_port}:{remote_host}:{container_open_port}"])
 
         def add_identity(base: List[str]) -> None:
             if identity_file:
@@ -216,13 +216,16 @@ class ContainerManager:
             if not bastion_host:
                 raise ValueError("double 模式需要 ssh.bastion_host 或 ssh.remote_server_ip。")
             outer: List[str] = ["ssh", "-T"]
-            add_identity(outer)
             add_port(outer, ssh_port)
+            add_identity(outer)
+            # 在本地直接转发到容器 IP（远端主机为容器 IP，由跳板路由）
+            add_forwards(outer, target_ip)
+            add_identity(outer)
             outer.append(f"{bastion_user}@{bastion_host}")
+            # 内层只负责保持连接
             inner: List[str] = ["ssh", "-T", "-o", "ExitOnForwardFailure=yes", "-N"]
             add_port(inner, ssh_cfg.get("container_port") or ssh_port)
             add_identity(inner)
-            add_forwards(inner)
             inner.append(f"{target_user}@{target_ip}")
             outer.append(" ".join(inner))
             cmd = outer
