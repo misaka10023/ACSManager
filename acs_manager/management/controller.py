@@ -215,11 +215,11 @@ class ContainerManager:
         if mode == "double":
             if not bastion_host:
                 raise ValueError("double 模式需要 ssh.bastion_host 或 ssh.remote_server_ip。")
-            outer: List[str] = ["ssh"]
+            outer: List[str] = ["ssh", "-T"]
             add_identity(outer)
             add_port(outer, ssh_port)
             outer.append(f"{bastion_user}@{bastion_host}")
-            inner: List[str] = ["ssh"]
+            inner: List[str] = ["ssh", "-T", "-o", "ExitOnForwardFailure=yes", "-N"]
             add_port(inner, ssh_cfg.get("container_port") or ssh_port)
             add_identity(inner)
             add_forwards(inner)
