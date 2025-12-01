@@ -323,10 +323,10 @@ class ContainerManager:
                 cmd = self.build_tunnel_command()
                 ssh_cfg = self._ssh_cfg(reload=True)
                 ports = self._forward_ports(ssh_cfg)
-                if self._tunnel_started_once and ports:
-                    if not await self._ensure_ports_free(ports):
-                        self.state["tunnel_status"] = "error"
-                        return
+                # 每次启动前都确保端口可用，并尝试清理同用户的 ssh 占用
+                if ports and not await self._ensure_ports_free(ports):
+                    self.state["tunnel_status"] = "error"
+                    return
             except Exception as exc:
                 logger.error("无法构建隧道命令: %s", exc)
                 self.state["tunnel_status"] = "error"
