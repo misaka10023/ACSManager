@@ -6,10 +6,11 @@ acs:
   login_password: "change-me"                  # 登录密码
   user_type: "os"                              # 登录用户类型（前端下拉：os/gridview 等）
   public_key: "MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBALaXEnbjI6fjy+t9W9AiO/KS0q+b/OZFS+7ykinLbiriUx9P8BcuuHnVbXNiZp5jW70eVGBtX4DhGUPzJa1YT/8CAwEAAQ=="  # 登录密码加密公钥（Base64），一般不用改
+  verify_ssl: true                             # 如为自签名证书可设为 false
   cookies:                                     # 预置的 JSESSIONID/GV_JSESSIONID（可选；为空则自动登录获取）
     JSESSIONID: ""
     GV_JSESSIONID: ""
-  container_name: "acs-container"              # 容器名称（如 E2SRLF）
+  container_name: "acs-container"              # 容器名称（如 E2SRLF）c
 
 ssh:
   mode: "jump"                                 # ssh 模式：direct(直连) | jump(-J) | double(两段 ssh)

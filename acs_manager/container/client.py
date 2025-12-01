@@ -31,6 +31,7 @@ class ContainerClient:
         self.store = store
         self.session = requests.Session()
         self.base_url = self._acs_cfg().get("base_url", "").rstrip("/")
+        self.session.verify = self._acs_cfg().get("verify_ssl", True)
 
     def _acs_cfg(self, reload: bool = False) -> Dict[str, Any]:
         return self.store.get_section("acs", default={}, reload=reload)
@@ -57,6 +58,7 @@ class ContainerClient:
         user_type = cfg.get("user_type", "os")
         public_key_b64 = cfg.get("public_key", "")
         preset_cookies = cfg.get("cookies", {}) or {}
+        self.session.verify = cfg.get("verify_ssl", True)
 
         if preset_cookies:
             # 直接复用配置中的 Cookie

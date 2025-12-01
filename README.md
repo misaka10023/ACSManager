@@ -49,7 +49,7 @@ Monitor the ACS web console, detect when long-running containers shut down, rest
 - PUT `/config` with a JSON object to replace the config entirely.
 - GET `/state` shows runtime state; GET `/container-ip` returns captured or fallback IP; GET `/logs?lines=200` tails the latest log file.
 - ContainerManager, PacketSniffer, and Web UI all read/write via ConfigStore, so updates go through the config module. If you change ACS base URL, restart the process so the sniffer uses the new target; SSH-related changes take effect immediately for newly built commands.
-- Web UI scope: remote config edits, runtime state, tunnel/log visibility, and container IP retrieval.
+- Web UI scope: remote config edits, runtime state, tunnel/log visibility, and container IP retrieval. Root `/` returns a JSON index to avoid 404.
 
 Example (update jump host):
 ```bash
@@ -80,6 +80,7 @@ SSH mode examples:
 - `acs.user_type`: user type dropdown value (e.g., os/gridview).
 - `acs.public_key`: RSA public key (Base64) for password encryption when logging in.
 - `acs.cookies`: optional preset cookies (JSESSIONID/GV_JSESSIONID); leave empty to auto-login.
+- `acs.verify_ssl`: set to false if the ACS host uses self-signed certs.
 - `acs.container_name`: identifier for the container (e.g., E2SRLF).
 - Capture filters are hard-coded in code; no capture.* config is required.
 - `ssh.mode`: `direct` | `jump` (-J) | `double` (two-hop ssh through bastion).

@@ -37,6 +37,15 @@ def state() -> dict:
     return manager.snapshot()
 
 
+@app.get("/")
+def root() -> dict:
+    """Simple landing endpoint to avoid 404 at root."""
+    return {
+        "message": "ACS Manager Web UI",
+        "endpoints": ["/health", "/state", "/config", "/container-ip", "/logs"],
+    }
+
+
 @app.get("/container-ip")
 def container_ip() -> dict:
     if manager is None:
