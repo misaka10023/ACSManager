@@ -181,7 +181,16 @@ class ContainerManager:
                         except Exception:
                             interval = slow_interval
 
-                    if status and status.lower() in {"terminated", "stopped", "stop", "failed"}:
+                    status_norm = (status or "").lower()
+                    stop_statuses = {"terminated", "stopped", "stop", "failed"}
+                    waiting_statuses = {"waiting"}
+
+                    # Waiting 视为排队状态，不触发重启，但可以考虑加快轮询
+                    if status_norm in waiting_statuses:
+                        logger.info("容器 %s 当前状态为 Waiting（排队），等待调度。", name)
+                        interval = min(interval, fast_interval)
+
+                    if status_norm in stop_statuses:
                         logger.warning("容器 %s 状态为 %s，触发重启。", name, status)
                         await self.restart_container()
                         break
