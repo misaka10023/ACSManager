@@ -50,13 +50,31 @@ class ContainerManager:
         await self.restart_container()
 
     async def restart_container(self) -> None:
-        """Placeholder for ACS restart logic (web automation or API call)."""
+        """Restart container via ACS restart API."""
         acs_cfg = self._acs_cfg(reload=True)
-        logger.warning(
-            "Restart logic not implemented for container `%s`. Implement ACS restart workflow here.",
-            acs_cfg.get("container_name", "<unknown>"),
-        )
-        self.state["last_restart"] = dt.datetime.utcnow()
+        name = acs_cfg.get("container_name")
+        if not name:
+            logger.error("No container_name configured; cannot restart.")
+            return
+
+        info = self.container_client.get_container_instance_info_by_name(name)
+        if not info:
+            logger.error("Container %s not found; cannot restart.", name)
+            return
+        task_id = info.get("instanceServiceId") or info.get("id")
+        if not task_id:
+            logger.error("No task id for %s; cannot restart.", name)
+            return
+
+        logger.warning("Attempting restart for container %s (task id: %s)", name, task_id)
+        resp = self.container_client.restart_task(task_id)
+        if str(resp.get("code")) == "0":
+            logger.info("Restart requested successfully: %s", resp)
+            self.state["last_restart"] = dt.datetime.utcnow()
+            # exit monitor loop after successful restart request
+            self._stop_requested = True
+        else:
+            logger.error("Restart request failed: %s", resp)
 
     def _parse_start_time(self, value: Optional[str]) -> Optional[dt.datetime]:
         if not value:
@@ -100,6 +118,7 @@ class ContainerManager:
                     if status and status.lower() in {"terminated", "stopped", "stop", "failed"}:
                         logger.warning("Container %s status %s -> attempting restart", name, status)
                         await self.restart_container()
+                        break
                 else:
                     logger.warning("Container %s not found; will retry soon", name)
                     interval = fast_interval

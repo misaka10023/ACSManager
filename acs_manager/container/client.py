@@ -140,3 +140,12 @@ class ContainerClient:
         """
         info = self.get_container_instance_info_by_name(name)
         return info.get("instanceIp") if info else None
+
+    def restart_task(self, task_id: str) -> Dict[str, Any]:
+        """
+        Call restart API for a task/instance.
+        """
+        url = f"{self.base_url}/sothisai/api/instance-service/task/actions/restart"
+        resp = self.session.post(url, json={"id": task_id})
+        resp.raise_for_status()
+        return resp.json()
