@@ -24,7 +24,7 @@ class ContainerClient:
     Minimal ACS container client:
     - login with RSA PKCS1 password encryption
     - reuse configured cookies when present
-    - fetch container IP data via instance-service API
+    - fetch container list and IP data via instance-service API
     """
 
     def __init__(self, store: ConfigStore) -> None:
@@ -98,3 +98,43 @@ class ContainerClient:
         resp = self.session.get(url)
         resp.raise_for_status()
         return resp.json()
+
+    def list_tasks(self, start: int = 0, limit: int = 50, sort: str = "DESC") -> Dict[str, Any]:
+        """List container tasks (instance-service task endpoint)."""
+        url = f"{self.base_url}/sothisai/api/instance-service/task"
+        resp = self.session.get(url, params={"start": start, "limit": limit, "sort": sort})
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_run_ips(self, instance_service_id: str) -> Dict[str, Any]:
+        """Fetch run-ips by instance service id."""
+        url = f"{self.base_url}/sothisai/api/instance-service/{instance_service_id}/run-ips"
+        resp = self.session.get(url)
+        resp.raise_for_status()
+        return resp.json()
+
+    def find_instance_by_name(self, name: str, *, start: int = 0, limit: int = 50) -> Optional[Dict[str, Any]]:
+        """Find first task matching the given name (instanceServiceName or notebook/task name)."""
+        data = self.list_tasks(start=start, limit=limit)
+        for item in data.get("data", []):
+            for key in ("instanceServiceName", "taskName", "notebookName", "name"):
+                if str(item.get(key, "")).strip().lower() == name.strip().lower():
+                    return item
+        return None
+
+    def get_container_ip_by_name(self, name: str) -> Optional[str]:
+        """
+        Look up container by service/task name and return its instanceIp if available.
+        """
+        task = self.find_instance_by_name(name)
+        if not task:
+            return None
+        service_id = task.get("id") or task.get("instanceServiceId")
+        if not service_id:
+            return None
+        run_ips = self.get_run_ips(service_id)
+        ips = run_ips.get("data") or []
+        if not ips:
+            return None
+        first = ips[0]
+        return first.get("instanceIp")

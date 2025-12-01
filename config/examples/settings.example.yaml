@@ -6,12 +6,11 @@ acs:
   login_user: "your-acs-username"              # 登录用户名（如使用免密可留空密码）
   login_password: "change-me"                  # 登录密码
   user_type: "os"                              # 登录用户类型（前端下拉：os/gridview 等）
-  public_key: "MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBALaXEnbjI6fjy+t9W9AiO/KS0q+b/OZFS+7ykinLbiriUx9P8BcuuHnVbXNiZp5jW70eVGBtX4DhGUPzJa1YT/8CAwEAAQ=="  # 登录密码加密公钥（Base64）
+  public_key: "MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBALaXEnbjI6fjy+t9W9AiO/KS0q+b/OZFS+7ykinLbiriUx9P8BcuuHnVbXNiZp5jW70eVGBtX4DhGUPzJa1YT/8CAwEAAQ=="  # 登录密码加密公钥（Base64），一般不用改
   cookies:                                     # 预置的 JSESSIONID/GV_JSESSIONID（可选）
     JSESSIONID: ""
     GV_JSESSIONID: ""
-  container_name: "acs-container"              # 容器名称
-  container_task_name: "E2SRLF"                 # 任务名称/容器别名，启动容器时使用
+  container_name: "acs-container"              # 容器名称（如 E2SRLF）
   container_ip_hint: "10.0.0.5"                # 抓包前的容器 IP 提示（可选）
   shutdown_hours: 360                           # 容器自动关机的小时数
   terminal_selector: "#terminal"               # 网页终端的 DOM 选择器

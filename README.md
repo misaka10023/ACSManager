@@ -81,8 +81,7 @@ SSH mode examples:
 - `acs.user_type`: user type dropdown value (e.g., os/gridview).
 - `acs.public_key`: RSA public key (Base64) for password encryption when logging in.
 - `acs.cookies`: optional preset cookies (JSESSIONID/GV_JSESSIONID) for session reuse.
-- `acs.container_name`: identifier for the container to restart.
-- `acs.container_task_name`: task/alias name used when starting the container (e.g., E2SRLF).
+- `acs.container_name`: identifier for the container (e.g., E2SRLF).
 - `acs.container_ip_hint`: initial container IP hint before capture detects a new one.
 - `acs.shutdown_hours`: expected auto-shutdown window (360h default).
 - `acs.terminal_selector`: DOM selector for the embedded terminal (for automation).
