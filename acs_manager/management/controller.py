@@ -392,7 +392,7 @@ done
             out = res.stdout.decode(errors="ignore").strip()
             err = res.stderr.decode(errors="ignore").strip()
             if res.returncode != 0:
-                logger.info("远端端口清理返回码 %s", res.returncode)
+                logger.debug("远端端口清理返回码 %s", res.returncode)
                 if err:
                     logger.debug("远端端口清理 stderr: %s", err)
             elif out:
