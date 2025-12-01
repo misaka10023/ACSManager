@@ -43,7 +43,7 @@ class ContainerManager:
     async def handle_new_ip(self, ip: str) -> None:
         """捕获到新 IP 时更新状态；IP 真变化且已建立过隧道才重启。"""
         old_ip = self.state.get("container_ip")
-        self.state["last_seen"] = dt.datetime.utcnow()
+        self.state["last_seen"] = dt.datetime.now()
 
         # IP 未变且隧道已跑过：仅当心跳，避免重复重启
         if old_ip == ip and self._tunnel_started_once:
@@ -85,7 +85,7 @@ class ContainerManager:
         if info and info.get("instanceIp"):
             ip = info["instanceIp"]
             self.state["container_ip"] = ip
-            self.state["last_seen"] = dt.datetime.utcnow()
+            self.state["last_seen"] = dt.datetime.now()
             logger.info("通过 API 自动获取容器 IP: %s", ip)
             return ip
         logger.warning("无法通过 API 获取容器 %s 的 IP。", name)
@@ -124,7 +124,7 @@ class ContainerManager:
             return
         if str(resp.get("code")) == "0":
             logger.info("重启请求成功: %s", resp)
-            self.state["last_restart"] = dt.datetime.utcnow()
+            self.state["last_restart"] = dt.datetime.now()
             self._stop_requested = True
         else:
             logger.error("重启请求失败: %s", resp)
@@ -198,7 +198,7 @@ class ContainerManager:
                     # 优先使用 ACS 提供的 remainingTime 计算剩余时间和预计停止时间
                     remaining_text = info.get("remainingTime")
                     remaining_from_str = self._parse_remaining_time_str(remaining_text)
-                    now = dt.datetime.utcnow()
+                    now = dt.datetime.now()
                     if remaining_from_str is not None:
                         delta = dt.timedelta(seconds=remaining_from_str)
                         next_shutdown = now + delta
@@ -599,7 +599,7 @@ done
                     await asyncio.wait_for(proc.wait(), timeout=5)
                 except asyncio.TimeoutError:
                     proc.kill()
-            self.state["tunnel_last_exit"] = dt.datetime.utcnow()
+            self.state["tunnel_last_exit"] = dt.datetime.now()
             self.state["tunnel_status"] = "stopped"
             self._tunnel_process = None
 
