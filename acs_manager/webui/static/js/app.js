@@ -50,32 +50,32 @@
       const el = document.getElementById("health-status");
       if (el) el.textContent = e.toString();
     }
-  }
-
-  async function loadState() {
-    const el = document.getElementById("state-block");
-    const meta = document.getElementById("health-meta");
-    if (!el) return;
     try {
       const data = await fetchJSON("/state");
       el.textContent = JSON.stringify(data, null, 2);
       if (meta) {
-        if (data.remaining_time_str && data.next_shutdown) {
-          meta.innerHTML = `å‰©ä½™æ—¶é—´: ${data.remaining_time_str}<br/>é¢„è®¡è‡ªåŠ¨åœæ­¢æ—¶é—´: ${data.next_shutdown}`;
-        } else if (data.remaining_time_str) {
-          meta.textContent = `å‰©ä½™æ—¶é—´: ${data.remaining_time_str}`;
-        } else if (data.next_shutdown) {
-          meta.textContent = `é¢„è®¡è‡ªåŠ¨åœæ­¢æ—¶é—´: ${data.next_shutdown}`;
-        } else {
-          meta.textContent = "æš‚æœªè·å–åˆ°è‡ªåŠ¨åœæ­¢/é‡å¯æ—¶é—´";
+        const lines = [];
+        if (data.container_start_time) {
+          lines.push(`ÈİÆ÷¿ªÊ¼Ê±¼ä: ${data.container_start_time}`);
         }
+        if (data.timeout_limit) {
+          lines.push(`Ê±¼äÏŞÖÆ: ${data.timeout_limit}`);
+        }
+        if (data.remaining_time_str) {
+          lines.push(`Ê£ÓàÊ±¼ä: ${data.remaining_time_str}`);
+        }
+        if (data.next_shutdown) {
+          lines.push(`Ô¤¼Æ×Ô¶¯Í£Ö¹Ê±¼ä: ${data.next_shutdown}`);
+        }
+        meta.innerHTML = lines.length
+          ? lines.join("<br/>")
+          : "ÔİÎ´»ñÈ¡µ½×Ô¶¯Í£Ö¹/ÖØÆôÊ±¼ä";
       }
     } catch (e) {
       el.textContent = e.toString();
-      if (meta) meta.textContent = "è·å–çŠ¶æ€å¤±è´¥ï¼Œæ— æ³•è®¡ç®—å‰©ä½™æ—¶é—´";
+      if (meta) meta.textContent = "»ñÈ¡×´Ì¬Ê§°Ü£¬ÎŞ·¨¼ÆËãÊ£ÓàÊ±¼ä";
     }
   }
-
   async function loadIP() {
     const valEl = document.getElementById("ip-value");
     const metaEl = document.getElementById("ip-meta");
@@ -89,7 +89,7 @@
       }
       metaEl.textContent = parts.join(" Â· ");
     } catch (e) {
-      valEl.textContent = "æœªè·å–";
+      valEl.textContent = "æœªè·å?;
       metaEl.textContent = e.toString();
     }
   }
@@ -128,7 +128,7 @@
     try {
       const data = await fetchJSON("/config?reload=true");
       area.value = JSON.stringify(data, null, 2);
-      status.textContent = "å·²åŠ è½½æœ€æ–°é…ç½®";
+      status.textContent = "å·²åŠ è½½æœ€æ–°é…ç½?;
       status.className = "text-sm text-slate-600 mt-2";
     } catch (e) {
       status.textContent = e.toString();

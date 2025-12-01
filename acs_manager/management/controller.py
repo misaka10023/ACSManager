@@ -27,6 +27,7 @@ class ContainerManager:
             "container_ip": None,
             "next_shutdown": None,
             "remaining_seconds": None,
+            "timeout_limit": None,
             "last_restart": None,
             "last_seen": None,
             "tunnel_status": "stopped",
@@ -201,6 +202,8 @@ class ContainerManager:
                     now = dt.datetime.now()
                     if start_dt and timeout_str:
                         try:
+                            # 记录当前使用的超时时间配置，方便 WebUI 展示
+                            self.state["timeout_limit"] = timeout_str
                             hours, minutes, seconds = timeout_str.split(":")
                             delta = dt.timedelta(hours=int(hours), minutes=int(minutes), seconds=int(seconds))
                             next_shutdown = start_dt + delta
@@ -230,12 +233,13 @@ class ContainerManager:
                             self.state["next_shutdown"] = None
                             self.state["remaining_seconds"] = None
                             self.state["remaining_time_str"] = None
+                            self.state["timeout_limit"] = None
                             interval = slow_interval
                     else:
                         self.state["next_shutdown"] = None
                         self.state["remaining_seconds"] = None
                         self.state["remaining_time_str"] = None
-                        interval = slow_interval
+                        self.state["timeout_limit"] = None
 
                     status_norm = (status or "").lower()
                     stop_statuses = {"terminated", "stopped", "stop", "failed"}
