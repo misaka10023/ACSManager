@@ -195,12 +195,15 @@ class ContainerManager:
                     if ip:
                         await self.handle_new_ip(ip)
 
-                    # 优先使用 ACS 提供的 remainingTime 计算剩余时间；如果不存在，则不展示剩余时间
+                    # 优先使用 ACS 提供的 remainingTime 计算剩余时间和预计停止时间
                     remaining_text = info.get("remainingTime")
                     remaining_from_str = self._parse_remaining_time_str(remaining_text)
+                    now = dt.datetime.utcnow()
                     if remaining_from_str is not None:
+                        delta = dt.timedelta(seconds=remaining_from_str)
+                        next_shutdown = now + delta
                         self.state["remaining_seconds"] = remaining_from_str
-                        self.state["next_shutdown"] = None
+                        self.state["next_shutdown"] = next_shutdown.strftime("%Y-%m-%d %H:%M:%S")
                         interval = fast_interval if remaining_from_str <= pre_shutdown_minutes * 60 else slow_interval
                     else:
                         self.state["remaining_seconds"] = None
