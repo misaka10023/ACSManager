@@ -82,6 +82,13 @@ async def run(config_path: str, log_level: str) -> None:
         asyncio.create_task(start_web_ui(web_cfg)),
         asyncio.create_task(manager.maintain_tunnel()),
     ]
+    # monitor container status/near-shutdown restarts
+    if acs_cfg.get("container_name"):
+        tasks.append(
+            asyncio.create_task(
+                manager.monitor_container(pre_shutdown_minutes=10, slow_interval=300, fast_interval=30)
+            )
+        )
     logging.info("ACS Manager running. Press Ctrl+C to exit.")
     try:
         await asyncio.gather(*tasks)

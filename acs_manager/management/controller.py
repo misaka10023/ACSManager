@@ -7,6 +7,7 @@ from asyncio.subprocess import Process
 from typing import Any, Dict, List, Optional
 
 from acs_manager.config.store import ConfigStore
+from acs_manager.container.client import ContainerClient
 
 logger = logging.getLogger(__name__)
 
@@ -14,14 +15,17 @@ logger = logging.getLogger(__name__)
 class ContainerManager:
     """Handle ACS container lifecycle, IP tracking, and SSH composition/maintenance."""
 
-    def __init__(self, store: ConfigStore) -> None:
+    def __init__(self, store: ConfigStore, container_client: Optional[ContainerClient] = None) -> None:
         self.store = store
+        self.container_client = container_client or ContainerClient(store)
         self.state: Dict[str, Any] = {
             "container_ip": None,
             "last_restart": None,
             "last_seen": None,
             "tunnel_status": "stopped",
             "tunnel_last_exit": None,
+            "container_status": None,
+            "container_start_time": None,
         }
         self._tunnel_process: Optional[Process] = None
         self._proc_lock = asyncio.Lock()
@@ -33,6 +37,10 @@ class ContainerManager:
         self.state["last_seen"] = dt.datetime.utcnow()
         logger.info("Container IP updated to %s", ip)
         await self.restart_tunnel()
+
+    def update_container_status(self, status: Optional[str], start_time: Optional[str]) -> None:
+        self.state["container_status"] = status
+        self.state["container_start_time"] = start_time
 
     async def ensure_running(self) -> None:
         """
@@ -49,6 +57,57 @@ class ContainerManager:
             acs_cfg.get("container_name", "<unknown>"),
         )
         self.state["last_restart"] = dt.datetime.utcnow()
+
+    def _parse_start_time(self, value: Optional[str]) -> Optional[dt.datetime]:
+        if not value:
+            return None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
+            try:
+                return dt.datetime.strptime(value, fmt)
+            except ValueError:
+                continue
+        return None
+
+    async def monitor_container(self, *, pre_shutdown_minutes: int = 10, slow_interval: int = 300, fast_interval: int = 30) -> None:
+        """
+        Periodically check container status; restart if stopped near shutdown window.
+        """
+        acs_cfg = self._acs_cfg(reload=True)
+        name = acs_cfg.get("container_name")
+        shutdown_hours = acs_cfg.get("shutdown_hours", 360)
+        if not name:
+            logger.warning("No container_name configured; monitor_container exiting.")
+            return
+
+        while not self._stop_requested:
+            interval = slow_interval
+            try:
+                info = self.container_client.get_container_instance_info_by_name(name)
+                if info:
+                    status = info.get("status")
+                    start_time_str = info.get("startTime") or info.get("createTime")
+                    self.update_container_status(status, start_time_str)
+                    ip = info.get("instanceIp")
+                    if ip:
+                        await self.handle_new_ip(ip)
+
+                    start_dt = self._parse_start_time(start_time_str)
+                    if start_dt:
+                        next_shutdown = start_dt + dt.timedelta(hours=shutdown_hours)
+                        threshold = next_shutdown - dt.timedelta(minutes=pre_shutdown_minutes)
+                        now = dt.datetime.utcnow()
+                        interval = fast_interval if now >= threshold else slow_interval
+                    if status and status.lower() in {"terminated", "stopped", "stop", "failed"}:
+                        logger.warning("Container %s status %s -> attempting restart", name, status)
+                        await self.restart_container()
+                else:
+                    logger.warning("Container %s not found; will retry soon", name)
+                    interval = fast_interval
+            except Exception as exc:  # pragma: no cover - network/API errors
+                logger.error("Monitor loop error: %s", exc)
+                interval = fast_interval
+
+            await asyncio.sleep(interval)
 
     def build_ssh_command(self, *, reload_config: bool = True) -> List[str]:
         """

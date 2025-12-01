@@ -122,10 +122,8 @@ class ContainerClient:
                     return item
         return None
 
-    def get_container_ip_by_name(self, name: str) -> Optional[str]:
-        """
-        Look up container by service/task name and return its instanceIp if available.
-        """
+    def get_container_instance_info_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        """Resolve container info (first run-ips record) by service/task name."""
         task = self.find_instance_by_name(name)
         if not task:
             return None
@@ -134,7 +132,11 @@ class ContainerClient:
             return None
         run_ips = self.get_run_ips(service_id)
         ips = run_ips.get("data") or []
-        if not ips:
-            return None
-        first = ips[0]
-        return first.get("instanceIp")
+        return ips[0] if ips else None
+
+    def get_container_ip_by_name(self, name: str) -> Optional[str]:
+        """
+        Look up container by service/task name and return its instanceIp if available.
+        """
+        info = self.get_container_instance_info_by_name(name)
+        return info.get("instanceIp") if info else None
