@@ -38,10 +38,24 @@ class ContainerManager:
         self._tunnel_started_once = False
 
     async def handle_new_ip(self, ip: str) -> None:
-        """捕获到新 IP 时更新状态并重启隧道。"""
-        self.state["container_ip"] = ip
+        """捕获到新 IP 时更新状态；IP 真变化且已建立过隧道才重启。"""
+        old_ip = self.state.get("container_ip")
         self.state["last_seen"] = dt.datetime.utcnow()
-        logger.info("容器 IP 更新为 %s", ip)
+
+        # IP 未变且隧道已跑过：仅当心跳，避免重复重启
+        if old_ip == ip and self._tunnel_started_once:
+            logger.debug("容器 IP 未变化(%s)，仅更新 last_seen。", ip)
+            return
+
+        self.state["container_ip"] = ip
+
+        # 首次拿到 IP：让 maintain_tunnel 执行第一次启动，不抢它的流程
+        if not self._tunnel_started_once:
+            logger.info("容器 IP 首次捕获为 %s，等待隧道初始化。", ip)
+            return
+
+        # IP 真变化：重启隧道
+        logger.info("容器 IP 更新为 %s（旧值: %s），重启隧道。", ip, old_ip)
         await self.restart_tunnel()
 
     def update_container_status(self, status: Optional[str], start_time: Optional[str]) -> None:
