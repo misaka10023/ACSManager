@@ -4,6 +4,7 @@ import asyncio
 import datetime as dt
 import getpass
 import logging
+import os
 import subprocess
 from asyncio.subprocess import Process
 from typing import Any, Dict, List, Optional
@@ -230,6 +231,7 @@ class ContainerManager:
             if port_value:
                 base.extend(["-p", str(port_value)])
 
+        known_hosts = "NUL" if os.name == "nt" else "/dev/null"
         keepalive = [
             "-o",
             "ServerAliveInterval=60",
@@ -240,7 +242,9 @@ class ContainerManager:
             "-o",
             "StrictHostKeyChecking=no",
             "-o",
-            "UserKnownHostsFile=/dev/null",
+            f"UserKnownHostsFile={known_hosts}",
+            "-o",
+            f"GlobalKnownHostsFile={known_hosts}",
         ]
 
         if mode == "double":
