@@ -195,22 +195,47 @@ class ContainerManager:
                     if ip:
                         await self.handle_new_ip(ip)
 
-                    # 优先使用 ACS 提供的 remainingTime 计算剩余时间和预计停止时间
-                    remaining_text = info.get("remainingTime")
-                    remaining_from_str = self._parse_remaining_time_str(remaining_text)
+                    # 使用 startTime + timeoutLimit 计算预计自动停止时间和剩余时间
+                    start_dt = self._parse_start_time(start_time_str)
+                    timeout_str = info.get("timeoutLimit")
                     now = dt.datetime.now()
-                    if remaining_from_str is not None:
-                        delta = dt.timedelta(seconds=remaining_from_str)
-                        next_shutdown = now + delta
-                        self.state["remaining_seconds"] = remaining_from_str
-                        self.state["next_shutdown"] = next_shutdown.strftime("%Y-%m-%d %H:%M:%S")
-                        interval = fast_interval if remaining_from_str <= pre_shutdown_minutes * 60 else slow_interval
+                    if start_dt and timeout_str:
+                        try:
+                            hours, minutes, seconds = timeout_str.split(":")
+                            delta = dt.timedelta(hours=int(hours), minutes=int(minutes), seconds=int(seconds))
+                            next_shutdown = start_dt + delta
+                            self.state["next_shutdown"] = next_shutdown.strftime("%Y-%m-%d %H:%M:%S")
+                            remaining = (next_shutdown - now).total_seconds()
+                            remaining_sec = int(remaining) if remaining > 0 else 0
+                            self.state["remaining_seconds"] = remaining_sec
+                            # 生成人类可读的剩余时间字符串
+                            if remaining_sec > 0:
+                                days = remaining_sec // 86400
+                                hours_left = (remaining_sec % 86400) // 3600
+                                mins_left = (remaining_sec % 3600) // 60
+                                parts = []
+                                if days > 0:
+                                    parts.append(f"{days} 天")
+                                if hours_left > 0:
+                                    parts.append(f"{hours_left} 小时")
+                                if mins_left > 0 or not parts:
+                                    parts.append(f"{mins_left} 分钟")
+                                self.state["remaining_time_str"] = " ".join(parts)
+                            else:
+                                self.state["remaining_time_str"] = "0 分钟"
+                            # 接近停止时间，使用快速轮询
+                            threshold = next_shutdown - dt.timedelta(minutes=pre_shutdown_minutes)
+                            interval = fast_interval if now >= threshold else slow_interval
+                        except Exception:
+                            self.state["next_shutdown"] = None
+                            self.state["remaining_seconds"] = None
+                            self.state["remaining_time_str"] = None
+                            interval = slow_interval
                     else:
-                        self.state["remaining_seconds"] = None
                         self.state["next_shutdown"] = None
+                        self.state["remaining_seconds"] = None
+                        self.state["remaining_time_str"] = None
                         interval = slow_interval
-                    # 记录 ACS 提供的 remainingTime（如果有），供前端展示
-                    self.state["remaining_time_str"] = str(remaining_text) if remaining_text else None
 
                     status_norm = (status or "").lower()
                     stop_statuses = {"terminated", "stopped", "stop", "failed"}
