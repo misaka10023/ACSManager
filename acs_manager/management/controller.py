@@ -1,11 +1,11 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import getpass
 import logging
 from asyncio.subprocess import Process
 from typing import Any, Dict, List, Optional
-import getpass
 
 import psutil
 
@@ -47,10 +47,7 @@ class ContainerManager:
         self.state["container_start_time"] = start_time
 
     async def ensure_running(self) -> None:
-        """
-        Entry point to be called when the capture layer detects a shutdown.
-        Insert ACS-specific API/browser automation here to restart the container.
-        """
+        """Entry point to be called when the capture layer detects a shutdown."""
         await self.restart_container()
 
     async def restart_container(self) -> None:
@@ -58,27 +55,26 @@ class ContainerManager:
         acs_cfg = self._acs_cfg(reload=True)
         name = acs_cfg.get("container_name")
         if not name:
-            logger.error("鏈厤缃?container_name锛屾棤娉曢噸鍚€?)
+            logger.error("未配置 container_name，无法重启。")
             return
 
         task = self.container_client.find_instance_by_name(name)
         if not task:
-            logger.error("鏈壘鍒板鍣?%s锛屾棤娉曢噸鍚€?, name)
+            logger.error("未找到容器 %s，无法重启。", name)
             return
         task_id = task.get("instanceServiceId") or task.get("id")
         if not task_id:
-            logger.error("瀹瑰櫒 %s 缂哄皯 instanceServiceId锛屾棤娉曢噸鍚€?, name)
+            logger.error("容器 %s 缺少 instanceServiceId，无法重启。", name)
             return
 
-        logger.warning("灏濊瘯閲嶅惎瀹瑰櫒 %s (task id: %s)", name, task_id)
+        logger.warning("尝试重启容器 %s (task id: %s)", name, task_id)
         resp = self.container_client.restart_task(task_id)
         if str(resp.get("code")) == "0":
-            logger.info("閲嶅惎璇锋眰鎴愬姛: %s", resp)
+            logger.info("重启请求成功: %s", resp)
             self.state["last_restart"] = dt.datetime.utcnow()
-            # exit monitor loop after successful restart request
             self._stop_requested = True
         else:
-            logger.error("閲嶅惎璇锋眰澶辫触: %s", resp)
+            logger.error("重启请求失败: %s", resp)
 
     def _parse_start_time(self, value: Optional[str]) -> Optional[dt.datetime]:
         if not value:
@@ -97,7 +93,7 @@ class ContainerManager:
         acs_cfg = self._acs_cfg(reload=True)
         name = acs_cfg.get("container_name")
         if not name:
-            logger.warning("No container_name configured; monitor_container exiting.")
+            logger.warning("未配置 container_name，监控退出。")
             return
 
         while not self._stop_requested:
@@ -112,27 +108,27 @@ class ContainerManager:
                     if ip:
                         await self.handle_new_ip(ip)
 
-        start_dt = self._parse_start_time(start_time_str)
-        if start_dt and info.get("timeoutLimit"):
-            # timeoutLimit format: "360:00:00"
-            try:
-                hours, minutes, seconds = info["timeoutLimit"].split(":")
-                delta = dt.timedelta(hours=int(hours), minutes=int(minutes), seconds=int(seconds))
-                next_shutdown = start_dt + delta
-                threshold = next_shutdown - dt.timedelta(minutes=pre_shutdown_minutes)
-                now = dt.datetime.utcnow()
-                interval = fast_interval if now >= threshold else slow_interval
-            except Exception:
-                interval = slow_interval
+                    start_dt = self._parse_start_time(start_time_str)
+                    if start_dt and info.get("timeoutLimit"):
+                        try:
+                            hours, minutes, seconds = info["timeoutLimit"].split(":")
+                            delta = dt.timedelta(hours=int(hours), minutes=int(minutes), seconds=int(seconds))
+                            next_shutdown = start_dt + delta
+                            threshold = next_shutdown - dt.timedelta(minutes=pre_shutdown_minutes)
+                            now = dt.datetime.utcnow()
+                            interval = fast_interval if now >= threshold else slow_interval
+                        except Exception:
+                            interval = slow_interval
+
                     if status and status.lower() in {"terminated", "stopped", "stop", "failed"}:
-                        logger.warning("Container %s status %s -> attempting restart", name, status)
+                        logger.warning("容器 %s 状态 %s，触发重启。", name, status)
                         await self.restart_container()
                         break
                 else:
-                    logger.warning("Container %s not found; will retry soon", name)
+                    logger.warning("容器 %s 未找到，将快速重试。", name)
                     interval = fast_interval
             except Exception as exc:  # pragma: no cover - network/API errors
-                logger.error("Monitor loop error: %s", exc)
+                logger.error("监控循环异常: %s", exc)
                 interval = fast_interval
 
             await asyncio.sleep(interval)
@@ -151,7 +147,7 @@ class ContainerManager:
 
         target_ip = self.state.get("container_ip") or ssh_cfg.get("container_ip")
         if not target_ip:
-            raise ValueError("瀹瑰櫒 IP 鏈煡锛屽皻鏈崟鑾锋垨閰嶇疆銆?)
+            raise ValueError("容器 IP 未知，尚未捕获或配置。")
 
         mode = (ssh_cfg.get("mode") or "jump").lower()
         target_user = ssh_cfg.get("target_user", "root")
@@ -183,9 +179,8 @@ class ContainerManager:
                 base.extend(["-p", str(port_value)])
 
         if mode == "double":
-            # ssh to bastion, then ssh from bastion to container
             if not bastion_host:
-                raise ValueError("double mode requires ssh.bastion_host or ssh.remote_server_ip")
+                raise ValueError("double 模式需要 ssh.bastion_host 或 ssh.remote_server_ip")
             outer: List[str] = ["ssh"]
             add_identity(outer)
             add_port(outer, ssh_port)
@@ -203,13 +198,13 @@ class ContainerManager:
             add_identity(cmd)
             if mode == "jump":
                 if not bastion_host:
-                    raise ValueError("jump mode requires ssh.bastion_host or ssh.remote_server_ip")
+                    raise ValueError("jump 模式需要 ssh.bastion_host 或 ssh.remote_server_ip")
                 cmd.extend(["-J", f"{bastion_user}@{bastion_host}"])
             add_forwards(cmd)
             cmd.append(f"{target_user}@{target_ip}")
 
         if password_login and password:
-            logger.info("妫€娴嬪埌瀵嗙爜鐧诲綍鏍囪锛岃纭繚鑷姩鍖栧畨鍏ㄥ鐞嗗瘑鐮佽緭鍏ャ€?)
+            logger.info("检测到密码登录标记，请确保自动化安全处理密码输入。")
         return cmd
 
     def build_tunnel_command(self) -> List[str]:
@@ -272,14 +267,12 @@ class ContainerManager:
 
     async def _ensure_ports_free(self, ports: List[int], retries: int = 3, delay: float = 1.0) -> bool:
         """
-        Retry freeing ports (by ensuring我们自己的隧道已停) before giving up.
+        Retry freeing ports (by ensuring our own tunnel is stopped) before giving up.
         """
         for attempt in range(retries):
             if self._ports_available(ports):
                 return True
-            # 尝试停止已有隧道，等待端口释放
             await self.stop_tunnel()
-            # 强杀当前用户占用端口的 ssh
             self._kill_ssh_on_ports(ports)
             if attempt < retries - 1:
                 await asyncio.sleep(delay)
