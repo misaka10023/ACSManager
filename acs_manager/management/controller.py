@@ -224,31 +224,31 @@ class ContainerManager:
             if port_value:
                 base.extend(["-p", str(port_value)])
 
-            if mode == "double":
+        if mode == "double":
+            if not bastion_host:
+                raise ValueError("double 模式需要 ssh.bastion_host 或 ssh.remote_server_ip。")
+            outer: List[str] = ["ssh", "-T"]
+            add_port(outer, ssh_port)
+            add_identity(outer)
+            outer.append(f"{bastion_user}@{bastion_host}")
+            # 内层负责保持连接并在容器侧打开远程转发
+            inner: List[str] = ["ssh", "-T", "-o", "ExitOnForwardFailure=yes", "-N"]
+            add_port(inner, ssh_cfg.get("container_port") or ssh_port)
+            add_identity(inner)
+            add_forwards(inner, remote_host="localhost", default_remote=True)
+            inner.append(f"{target_user}@{target_ip}")
+            outer.append(" ".join(inner))
+            cmd = outer
+        else:
+            cmd: List[str] = ["ssh"]
+            add_port(cmd, ssh_port)
+            add_identity(cmd)
+            if mode == "jump":
                 if not bastion_host:
-                    raise ValueError("double 模式需要 ssh.bastion_host 或 ssh.remote_server_ip。")
-                outer: List[str] = ["ssh", "-T"]
-                add_port(outer, ssh_port)
-                add_identity(outer)
-                outer.append(f"{bastion_user}@{bastion_host}")
-                # 内层负责保持连接并在容器侧打开远程转发
-                inner: List[str] = ["ssh", "-T", "-o", "ExitOnForwardFailure=yes", "-N"]
-                add_port(inner, ssh_cfg.get("container_port") or ssh_port)
-                add_identity(inner)
-                add_forwards(inner, remote_host="localhost", default_remote=True)
-                inner.append(f"{target_user}@{target_ip}")
-                outer.append(" ".join(inner))
-                cmd = outer
-            else:
-                cmd: List[str] = ["ssh"]
-                add_port(cmd, ssh_port)
-                add_identity(cmd)
-                if mode == "jump":
-                    if not bastion_host:
-                        raise ValueError("jump 模式需要 ssh.bastion_host 或 ssh.remote_server_ip。")
-                    cmd.extend(["-J", f"{bastion_user}@{bastion_host}"])
-                add_forwards(cmd, default_remote=True)
-                cmd.append(f"{target_user}@{target_ip}")
+                    raise ValueError("jump 模式需要 ssh.bastion_host 或 ssh.remote_server_ip。")
+                cmd.extend(["-J", f"{bastion_user}@{bastion_host}"])
+            add_forwards(cmd, default_remote=True)
+            cmd.append(f"{target_user}@{target_ip}")
 
         if password_login and password:
             logger.info("检测到密码登录标记，请确保自动化安全处理密码输入。")
