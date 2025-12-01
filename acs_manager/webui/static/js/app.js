@@ -60,26 +60,12 @@
       const data = await fetchJSON("/state");
       el.textContent = JSON.stringify(data, null, 2);
       if (meta) {
-        if (data.remaining_time_str) {
+        if (data.remaining_time_str && data.next_shutdown) {
+          meta.textContent = `剩余时间: ${data.remaining_time_str}（预计自动停止时间: ${data.next_shutdown}）`;
+        } else if (data.remaining_time_str) {
           meta.textContent = `剩余时间: ${data.remaining_time_str}`;
         } else if (data.next_shutdown) {
-          const ts = Date.parse(data.next_shutdown);
-          if (!Number.isNaN(ts)) {
-            const now = Date.now();
-            const diffSec = Math.max(0, Math.floor((ts - now) / 1000));
-            const mins = Math.floor(diffSec / 60);
-            const hours = Math.floor(mins / 60);
-            let human = "";
-            if (hours > 0) {
-              human = `${hours} 小时 ${mins % 60} 分钟`;
-            } else {
-              human = `${mins} 分钟`;
-            }
-            const pretty = formatDateTimeStr(data.next_shutdown);
-            meta.textContent = `预计自动停止时间: ${pretty}（约剩余 ${human}）`;
-          } else {
-            meta.textContent = `预计自动停止时间: ${formatDateTimeStr(data.next_shutdown)}`;
-          }
+          meta.textContent = `预计自动停止时间: ${data.next_shutdown}`;
         } else {
           meta.textContent = "暂未获取到自动停止/重启时间";
         }
@@ -99,9 +85,7 @@
       valEl.textContent = data.ip || data.container_ip || "未知";
       const parts = [`来源: ${data.source || "unknown"}`];
       if (data.updated_at) {
-        const pretty = formatDateTimeStr(data.updated_at);
-        const ago = formatAgo(data.updated_at);
-        parts.push(`更新时间: ${pretty}${ago ? `（${ago}）` : ""}`);
+        parts.push(`更新时间: ${data.updated_at}`);
       }
       metaEl.textContent = parts.join(" · ");
     } catch (e) {

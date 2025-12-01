@@ -89,7 +89,7 @@ def container_ip() -> dict:
     if manager and manager.snapshot().get("last_seen"):
         seen = manager.snapshot().get("last_seen")
         if isinstance(seen, dt.datetime):
-            payload["updated_at"] = seen.isoformat()
+            payload["updated_at"] = seen.strftime("%Y-%m-%d %H:%M:%S")
     return payload
 
 
