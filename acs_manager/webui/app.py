@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import datetime as dt
-from pathlib import Path
-from typing import Optional
-
 import json
+import logging
+from pathlib import Path
+from typing import Any, Dict, Optional
+
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -12,6 +13,8 @@ from fastapi.templating import Jinja2Templates
 
 from acs_manager.config.store import ConfigStore
 from acs_manager.management.controller import ContainerManager
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).parent
 TEMPLATES_DIR = BASE_DIR / "templates"
@@ -97,22 +100,81 @@ def get_config(reload: bool = True) -> dict:
     return config_store.read(reload=reload)
 
 
+def _critical_snapshot(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    acs = cfg.get("acs", {}) or {}
+    ssh = cfg.get("ssh", {}) or {}
+    return {
+        "acs.base_url": acs.get("base_url"),
+        "acs.api_prefix": acs.get("api_prefix"),
+        "acs.login_user": acs.get("login_user"),
+        "acs.login_password": acs.get("login_password"),
+        "acs.public_key": acs.get("public_key"),
+        "ssh.mode": ssh.get("mode"),
+        "ssh.remote_server_ip": ssh.get("remote_server_ip"),
+        "ssh.bastion_host": ssh.get("bastion_host"),
+        "ssh.bastion_user": ssh.get("bastion_user"),
+        "ssh.target_user": ssh.get("target_user"),
+        "ssh.port": ssh.get("port"),
+        "ssh.container_port": ssh.get("container_port"),
+        "ssh.local_open_port": ssh.get("local_open_port"),
+        "ssh.container_open_port": ssh.get("container_open_port"),
+        "ssh.forwards": ssh.get("forwards"),
+        "ssh.reverse_forwards": ssh.get("reverse_forwards"),
+        "ssh.intermediate_port": ssh.get("intermediate_port"),
+    }
+
+
+async def _post_config_change(old_cfg: Dict[str, Any], new_cfg: Dict[str, Any]) -> None:
+    """关键配置变更后：重新登录刷新 cookies，并必要时重启 SSH 隧道。"""
+    if manager is None:
+        return
+
+    before = _critical_snapshot(old_cfg)
+    after = _critical_snapshot(new_cfg)
+
+    acs_keys = [k for k in before.keys() if k.startswith("acs.")]
+    ssh_keys = [k for k in before.keys() if k.startswith("ssh.")]
+
+    acs_changed = any(before[k] != after[k] for k in acs_keys)
+    ssh_changed = any(before[k] != after[k] for k in ssh_keys)
+
+    if acs_changed:
+        try:
+            logger.info("检测到 ACS 关键配置变更，尝试重新登录以刷新 cookies。")
+            manager.container_client.login()  # type: ignore[attr-defined]
+        except Exception as exc:  # pragma: no cover - 网络/ACS 异常
+            logger.error("重新登录以刷新 ACS cookies 失败: %s", exc)
+
+    if ssh_changed:
+        try:
+            logger.info("检测到 SSH 关键配置变更，重启隧道以应用新配置。")
+            await manager.restart_tunnel()
+        except Exception as exc:  # pragma: no cover - 隧道异常
+            logger.error("重启 SSH 隧道失败: %s", exc)
+
+
 @app.patch("/config")
-def patch_config(payload: dict = Body(..., embed=False)) -> dict:
+async def patch_config(payload: dict = Body(..., embed=False)) -> dict:
     if config_store is None:
         raise HTTPException(status_code=503, detail="Config store not ready")
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Payload must be an object")
-    return config_store.update(payload)
+    old_cfg = config_store.read(reload=False)
+    new_cfg = config_store.update(payload)
+    await _post_config_change(old_cfg, new_cfg)
+    return new_cfg
 
 
 @app.put("/config")
-def replace_config(payload: dict = Body(..., embed=False)) -> dict:
+async def replace_config(payload: dict = Body(..., embed=False)) -> dict:
     if config_store is None:
         raise HTTPException(status_code=503, detail="Config store not ready")
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Payload must be an object")
-    return config_store.write(payload)
+    old_cfg = config_store.read(reload=False)
+    new_cfg = config_store.write(payload)
+    await _post_config_change(old_cfg, new_cfg)
+    return new_cfg
 
 
 def _latest_log_file() -> Path:
