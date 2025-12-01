@@ -26,11 +26,14 @@ ssh:
   identity_file: "~/.ssh/id_ed25519"       # 私钥路径（密钥登录）
   local_open_port: 7890                    # 本地端口（本地代理软件监听）
   container_open_port: 7890                # 容器内监听端口
-  forwards:                                # 额外转发列表，remote 为容器端口
+  forwards:                                # 额外正向转发列表 (-L)，remote 为远端端口
     - local: 7891
       remote: 7892
     - local: 8022
       remote: 22
+  reverse_forwards:                        # 额外反向转发列表 (-R)，remote 为远端监听端口；为空则默认 -R container_open_port:localhost:local_open_port
+    - local: 9000      # 本地端口
+      remote: 9000     # 远端监听端口（容器侧）
 
 webui:
   host: "0.0.0.0"                          # Web UI 绑定地址
