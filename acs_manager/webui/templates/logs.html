@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card" data-page="logs">
+  <div class="card-title flex items-center justify-between">
+    <span>运行日志</span>
+    <div class="flex items-center gap-3 text-sm text-slate-700">
+      <label class="flex items-center gap-1">
+        <input type="checkbox" id="log-auto" class="form-checkbox" checked />
+        <span>自动刷新</span>
+      </label>
+      <label class="flex items-center gap-1">
+        <span>间隔</span>
+        <select id="log-interval" class="border rounded px-2 py-1 text-sm">
+          <option value="2000">2s</option>
+          <option value="5000" selected>5s</option>
+          <option value="10000">10s</option>
+        </select>
+      </label>
+      <button id="log-refresh" class="btn btn-secondary text-xs">刷新</button>
+    </div>
+  </div>
+  <pre id="log-view" class="code-block h-[520px] overflow-y-auto">Loading...</pre>
+</div>
+{% endblock %}

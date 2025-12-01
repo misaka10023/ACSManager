@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4" data-page="dashboard">
+  <div class="card col-span-1">
+    <div class="card-title">健康状态</div>
+    <div id="health-status" class="text-sm text-slate-700">Loading...</div>
+  </div>
+  <div class="card col-span-1">
+    <div class="card-title">容器 IP</div>
+    <div class="text-sm text-slate-700 space-y-1">
+      <div><span class="badge">IP</span> <span id="ip-value">—</span></div>
+      <div class="text-xs text-slate-500" id="ip-meta"></div>
+    </div>
+  </div>
+  <div class="card col-span-1">
+    <div class="card-title">隧道状态</div>
+    <pre id="state-block" class="code-block h-32">Loading...</pre>
+  </div>
+</div>
+<div class="card mt-6">
+  <div class="card-title flex items-center justify-between">
+    <span>最近日志（200 行）</span>
+    <button id="dash-refresh" class="btn btn-secondary text-xs">刷新</button>
+  </div>
+  <pre id="dash-logs" class="code-block h-64 overflow-y-auto">Loading...</pre>
+</div>
+{% endblock %}
