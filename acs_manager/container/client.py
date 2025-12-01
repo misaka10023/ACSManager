@@ -71,7 +71,8 @@ class ContainerClient:
         for k, v in cookies.items():
             self.session.cookies.set(k, v)
 
-    def _url(self, path: str) -> str:
+    def _url_api(self, path: str) -> str:
+        """带 api_prefix 的业务接口 URL。"""
         if not path.startswith("/"):
             path = "/" + path
         if not self.base_url:
@@ -82,6 +83,14 @@ class ContainerClient:
         if prefix and base.endswith(prefix.lstrip("/")):
             prefix = ""
         return f"{base}{prefix}{path}"
+
+    def _url_raw(self, path: str) -> str:
+        """不带 api_prefix 的 URL（登录页/登录接口用）。"""
+        if not path.startswith("/"):
+            path = "/" + path
+        if not self.base_url:
+            raise ValueError("未配置 acs.base_url，无法构建请求 URL。")
+        return f"{self.base_url.rstrip('/')}{path}"
 
     def login(self, auth_code: str = "") -> LoginResult:
         cfg = self._apply_cfg(reload=True)
@@ -100,8 +109,8 @@ class ContainerClient:
         if not username or not password or not public_key_b64 or not self.base_url:
             raise ValueError("缺少 ACS 登录配置（用户名/密码/公钥/base_url）。")
 
-        # 预热 session（使用实际登录页）
-        self.session.get(self._url("/login/loginPage.action"))
+        # 预热 session（使用实际登录页，无前缀）
+        self.session.get(self._url_raw("/login/loginPage.action"))
 
         enc_pwd = self._encrypt_password(password, public_key_b64)
         payload = {
@@ -111,7 +120,7 @@ class ContainerClient:
             "authCode": auth_code,
             "encrypted": True,
         }
-        resp = self.session.post(self._url("/login/loginAuth.action"), data=payload)
+        resp = self.session.post(self._url_raw("/login/loginAuth.action"), data=payload)
         resp.raise_for_status()
         data = resp.json()
         cookies = self.session.cookies.get_dict()
@@ -128,21 +137,21 @@ class ContainerClient:
 
     def list_tasks(self, start: int = 0, limit: int = 20, sort: str = "DESC") -> Dict[str, Any]:
         """获取任务列表（/sothisai/api/instance-service/task）。"""
-        url = self._url("/api/instance-service/task")
+        url = self._url_api("/api/instance-service/task")
         resp = self.session.get(url, params={"start": start, "limit": limit, "sort": sort})
         resp.raise_for_status()
         return resp.json()
 
     def get_run_ips(self, instance_service_id: str) -> Dict[str, Any]:
         """通过 run-ips 获取容器 IP 列表。"""
-        url = self._url(f"/api/instance-service/{instance_service_id}/run-ips")
+        url = self._url_api(f"/api/instance-service/{instance_service_id}/run-ips")
         resp = self.session.get(url)
         resp.raise_for_status()
         return resp.json()
 
     def get_container_monitor(self, instance_service_id: str) -> Dict[str, Any]:
         """获取容器运行状态详情（container-monitor 接口）。"""
-        url = self._url(f"/api/instance/{instance_service_id}/container-monitor")
+        url = self._url_api(f"/api/instance/{instance_service_id}/container-monitor")
         resp = self.session.get(url)
         resp.raise_for_status()
         return resp.json()
@@ -193,7 +202,7 @@ class ContainerClient:
 
     def restart_task(self, task_id: str) -> Dict[str, Any]:
         """调用重启接口 /api/instance-service/task/actions/restart。"""
-        url = self._url("/api/instance-service/task/actions/restart")
+        url = self._url_api("/api/instance-service/task/actions/restart")
         resp = self.session.post(url, json={"id": task_id})
         resp.raise_for_status()
         return resp.json()

@@ -40,17 +40,31 @@ def state() -> dict:
 
 @app.get("/")
 def root() -> HTMLResponse:
-    """Simple UI landing page."""
+    """Landing page: 显示健康、状态、IP、配置、日志。"""
     html = """
     <!DOCTYPE html>
     <html lang="zh-CN">
     <head><meta charset="UTF-8"><title>ACS Manager</title></head>
     <body>
       <h2>ACS Manager Web UI</h2>
-      <p><a href="/health" target="_blank">/health</a></p>
-      <p><a href="/state" target="_blank">/state</a></p>
-      <p><a href="/config" target="_blank">GET /config</a></p>
-      <p><a href="/logs" target="_blank">GET /logs</a></p>
+      <div id="sections">
+        <section>
+          <h3>健康</h3>
+          <pre id="health"></pre>
+        </section>
+        <section>
+          <h3>运行状态</h3>
+          <pre id="state"></pre>
+        </section>
+        <section>
+          <h3>容器 IP</h3>
+          <pre id="cip"></pre>
+        </section>
+        <section>
+          <h3>最新日志（200行）</h3>
+          <pre id="logs"></pre>
+        </section>
+      </div>
       <h3>配置修改</h3>
       <form id="cfgForm">
         <textarea id="cfg" rows="20" cols="80"></textarea><br/>
@@ -63,6 +77,33 @@ def root() -> HTMLResponse:
           const data = await res.json();
           document.getElementById('cfg').value = JSON.stringify(data, null, 2);
         }
+        async function loadHealth() {
+          const res = await fetch('/health');
+          document.getElementById('health').textContent = JSON.stringify(await res.json(), null, 2);
+        }
+        async function loadState() {
+          const res = await fetch('/state');
+          document.getElementById('state').textContent = JSON.stringify(await res.json(), null, 2);
+        }
+        async function loadIP() {
+          try {
+            const res = await fetch('/container-ip');
+            document.getElementById('cip').textContent = JSON.stringify(await res.json(), null, 2);
+          } catch (e) {
+            document.getElementById('cip').textContent = e.toString();
+          }
+        }
+        async function loadLogs() {
+          try {
+            const res = await fetch('/logs');
+            document.getElementById('logs').textContent = JSON.stringify(await res.json(), null, 2);
+          } catch (e) {
+            document.getElementById('logs').textContent = e.toString();
+          }
+        }
+        async function refreshAll() {
+          await Promise.all([loadHealth(), loadState(), loadIP(), loadCfg(), loadLogs()]);
+        }
         async function save() {
           const txt = document.getElementById('cfg').value;
           try {
@@ -74,11 +115,12 @@ def root() -> HTMLResponse:
             });
             const data = await res.json();
             document.getElementById('msg').textContent = JSON.stringify(data, null, 2);
+            await refreshAll();
           } catch (e) {
             document.getElementById('msg').textContent = e.toString();
           }
         }
-        loadCfg();
+        refreshAll();
       </script>
     </body>
     </html>
