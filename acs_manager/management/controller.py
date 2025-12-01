@@ -244,7 +244,18 @@ class ContainerManager:
             if port_value:
                 base.extend(["-p", str(port_value)])
 
-        keepalive = ["-o", "ServerAliveInterval=60", "-o", "ServerAliveCountMax=3", "-o", "ExitOnForwardFailure=yes"]
+        keepalive = [
+            "-o",
+            "ServerAliveInterval=60",
+            "-o",
+            "ServerAliveCountMax=3",
+            "-o",
+            "ExitOnForwardFailure=yes",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+        ]
 
         if mode == "double":
             if not bastion_host:
