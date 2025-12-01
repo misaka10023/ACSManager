@@ -7,6 +7,7 @@ Monitor the ACS web console, detect when long-running containers shut down, rest
 - Management controller keeps an SSH tunnel alive for port forwarding (direct / `-J` / double-ssh), restarts on disconnect, and cleans up before re-establishing.
 - Web UI for remote config edits, viewing state, tailing logs, and fetching container IP.
 - Logging goes to `logs/YYYY-MM-DD.log` plus console.
+- Container client helper (capture) can log in with RSA-encrypted password using config public key/cookies and query container IPs via instance-service API.
 - ConfigStore with atomic YAML/JSON read/write so the app and Web UI share the latest settings.
 
 ## Project layout
@@ -76,6 +77,9 @@ SSH mode examples:
 - `acs.base_url`: ACS web console base URL.
 - `acs.session_cookie`: GV_JSESSIONID cookie string to keep the session alive.
 - `acs.login_user` / `acs.login_password`: credentials for automation or API use.
+- `acs.user_type`: user type dropdown value (e.g., os/gridview).
+- `acs.public_key`: RSA public key (Base64) for password encryption when logging in.
+- `acs.cookies`: optional preset cookies (JSESSIONID/GV_JSESSIONID) for session reuse.
 - `acs.container_name`: identifier for the container to restart.
 - `acs.container_task_name`: task/alias name used when starting the container (e.g., E2SRLF).
 - `acs.container_ip_hint`: initial container IP hint before capture detects a new one.
