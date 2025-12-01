@@ -46,6 +46,28 @@ class ContainerManager:
         self.state["container_status"] = status
         self.state["container_start_time"] = start_time
 
+    def resolve_container_ip(self, *, force_login: bool = True) -> Optional[str]:
+        """Auto-fetch container IP via API when missing."""
+        name = self._acs_cfg(reload=True).get("container_name")
+        if not name:
+            logger.warning("未配置 container_name，无法自动获取 IP。")
+            return None
+        if force_login:
+            try:
+                self.container_client.login()
+            except Exception as exc:  # pragma: no cover - network errors
+                logger.error("自动登录以获取容器 IP 失败: %s", exc)
+                return None
+        info = self.container_client.get_container_instance_info_by_name(name)
+        if info and info.get("instanceIp"):
+            ip = info["instanceIp"]
+            self.state["container_ip"] = ip
+            self.state["last_seen"] = dt.datetime.utcnow()
+            logger.info("自动获取容器 IP: %s", ip)
+            return ip
+        logger.warning("无法通过 API 获取容器 %s 的 IP。", name)
+        return None
+
     async def ensure_running(self) -> None:
         """Entry point to be called when the capture layer detects a shutdown."""
         await self.restart_container()
@@ -146,6 +168,8 @@ class ContainerManager:
         acs_cfg = self._acs_cfg(reload=reload_config)
 
         target_ip = self.state.get("container_ip") or ssh_cfg.get("container_ip")
+        if not target_ip:
+            target_ip = self.resolve_container_ip()
         if not target_ip:
             raise ValueError("容器 IP 未知，尚未捕获或配置。")
 
