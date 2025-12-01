@@ -4,6 +4,7 @@ import datetime as dt
 from pathlib import Path
 from typing import Optional
 
+import json
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -156,7 +157,16 @@ def ui_dashboard(request: Request) -> HTMLResponse:
 
 @app.get("/ui/config", response_class=HTMLResponse)
 def ui_config(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse("config.html", {"request": request, "page": "config"})
+    cfg_text = ""
+    if config_store:
+        try:
+            cfg_text = json.dumps(config_store.read(reload=False), indent=2, ensure_ascii=False)
+        except Exception:
+            cfg_text = ""
+    return templates.TemplateResponse(
+        "config.html",
+        {"request": request, "page": "config", "config_json": cfg_text},
+    )
 
 
 @app.get("/ui/logs", response_class=HTMLResponse)
