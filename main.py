@@ -1,9 +1,10 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import asyncio
 import datetime as dt
 import logging
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,9 @@ from acs_manager.capture.sniffer import PacketSniffer
 from acs_manager.config import ConfigStore
 from acs_manager.management.controller import ContainerManager
 from acs_manager.webui import app as web_app
+
+DEFAULT_CONFIG = "config/local/settings.yaml"
+TEMPLATE_CONFIG = "config/examples/settings.example.yaml"
 
 
 async def start_web_ui(web_cfg: dict[str, Any]) -> None:
@@ -41,8 +45,24 @@ def setup_logging(log_level: str) -> Path:
     return log_path
 
 
+def ensure_config(config_path: str, template_path: str = TEMPLATE_CONFIG) -> Path:
+    """
+    Ensure the target config exists; if missing, create directories and copy from template.
+    """
+    target = Path(config_path)
+    if target.exists():
+        return target
+    template = Path(template_path)
+    if not template.exists():
+        raise FileNotFoundError(f"Config template not found: {template}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(template, target)
+    return target
+
+
 async def run(config_path: str, log_level: str) -> None:
-    store = ConfigStore(config_path)
+    cfg_path = ensure_config(config_path)
+    store = ConfigStore(cfg_path)
     manager = ContainerManager(store)
     web_app.bind_manager(manager)
     web_app.bind_config_store(store)
@@ -75,8 +95,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="ACS Manager entrypoint")
     parser.add_argument(
         "--config",
-        default="config/settings.example.yaml",
-        help="Path to YAML/JSON config file",
+        default=DEFAULT_CONFIG,
+        help="Path to YAML/JSON config file (auto-created from template if missing)",
     )
     parser.add_argument(
         "--log-level",

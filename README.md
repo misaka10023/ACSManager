@@ -7,8 +7,8 @@ Monitor the ACS web console, detect when long-running containers shut down, rest
 - Management controller keeps an SSH tunnel alive for port forwarding (direct / `-J` / double-ssh), restarts on disconnect, and cleans up before re-establishing.
 - Web UI for remote config edits, viewing state, tailing logs, and fetching container IP.
 - Logging goes to `logs/YYYY-MM-DD.log` plus console.
-- Container client helper (capture) can log in with RSA-encrypted password using config public key/cookies and query container IPs via instance-service API.
 - ConfigStore with atomic YAML/JSON read/write so the app and Web UI share the latest settings.
+- Container client helper (capture) can log in with RSA-encrypted password using config public key/cookies and query container IPs via instance-service API.
 
 ## Project layout
 - acs_manager/
@@ -16,7 +16,8 @@ Monitor the ACS web console, detect when long-running containers shut down, rest
   - management/  (container lifecycle + SSH orchestration)
   - webui/  (FastAPI app exposing health/state/config)
   - config/  (config loader and ConfigStore)
-- config/settings.example.yaml  (sample configuration)
+- config/examples/settings.example.yaml  (sample configuration)
+- config/local/settings.yaml  (auto-created from sample on first run)
 - main.py  (entrypoint tying capture, manager, web UI)
 - requirements.txt  (dependencies)
 - README.md
@@ -31,14 +32,14 @@ Monitor the ACS web console, detect when long-running containers shut down, rest
    ```bash
    pip install -r requirements.txt
    ```
-3) Copy and edit the config:
+3) 配置：首次运行若 `config/local/settings.yaml` 不存在会自动从 `config/examples/settings.example.yaml` 生成，可直接编辑生成的文件。也可手动复制：
    ```bash
-   copy config\settings.example.yaml config\settings.yaml
+   copy config\examples\settings.example.yaml config\local\settings.yaml
    ```
-   Fill in ACS credentials/URLs, session cookie, container/bastion IPs, and SSH details.
+   填写 ACS 账号、公钥、（可选）预置 Cookie，以及容器/SSH 参数。
 4) Run the manager (logs to stdout):
    ```bash
-   python main.py --config config/settings.yaml --log-level DEBUG
+   python main.py --config config/local/settings.yaml --log-level DEBUG
    ```
 5) Web UI (served by the same process): visit `http://localhost:8000/health`, `/state`, and `/config`.
 
