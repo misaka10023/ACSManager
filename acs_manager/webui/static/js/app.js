@@ -31,7 +31,9 @@
       const data = await fetchJSON("/state");
       el.textContent = JSON.stringify(data, null, 2);
       if (meta) {
-        if (data.next_shutdown) {
+        if (data.remaining_time_str) {
+          meta.textContent = `剩余时间: ${data.remaining_time_str}`;
+        } else if (data.next_shutdown) {
           const ts = Date.parse(data.next_shutdown);
           if (!Number.isNaN(ts)) {
             const now = Date.now();

@@ -38,6 +38,7 @@ class ContainerManager:
         self._proc_lock = asyncio.Lock()
         self._stop_requested = False
         self._tunnel_started_once = False
+        self._tunnel_failure_count = 0
 
     async def handle_new_ip(self, ip: str) -> None:
         """捕获到新 IP 时更新状态；IP 真变化且已建立过隧道才重启。"""
@@ -187,6 +188,11 @@ class ContainerManager:
                             self.state["next_shutdown"] = None
                             self.state["remaining_seconds"] = None
                             interval = slow_interval
+                    # 记录 ACS 提供的 remainingTime（如果有），仅用于前端展示
+                    if info.get("remainingTime"):
+                        self.state["remaining_time_str"] = str(info["remainingTime"])
+                    else:
+                        self.state["remaining_time_str"] = None
 
                     status_norm = (status or "").lower()
                     stop_statuses = {"terminated", "stopped", "stop", "failed"}
@@ -594,7 +600,18 @@ done
                 continue
             try:
                 rc = await proc.wait()
-                logger.warning("SSH 隧道退出码 %s；稍后重启。", rc)
+                if rc == 0:
+                    self._tunnel_failure_count = 0
+                    logger.info("SSH 隧道正常退出。")
+                else:
+                    self._tunnel_failure_count += 1
+                    logger.warning("SSH 隧道退出码 %s；稍后重启。（连续失败次数：%s）", rc, self._tunnel_failure_count)
+                    # 多次失败后尝试重新刷新容器 IP，再重试隧道
+                    if self._tunnel_failure_count >= 3:
+                        name = self._acs_cfg(reload=True).get("container_name")
+                        logger.warning("SSH 隧道连续失败 >=3 次，尝试通过 API 刷新容器 IP（容器：%s）。", name)
+                        self.resolve_container_ip(force_login=True)
+                        self._tunnel_failure_count = 0
             except Exception as exc:  # pragma: no cover - 子进程异常
                 logger.error("SSH 隧道崩溃: %s", exc)
             finally:

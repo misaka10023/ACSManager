@@ -205,22 +205,23 @@ class ContainerClient:
         if not info:
             return None
 
-        # 优先使用 container-monitor 的字段，缺失时从任务记录补充
+        # 优先使用任务列表中的字段，覆盖 container-monitor 中可能过期的值
         # 状态字段
-        if not info.get("status"):
-            for key in ("status", "instanceStatus", "taskStatus"):
-                if task.get(key):
-                    info["status"] = task.get(key)
-                    break
-        # 启动时间
-        if not info.get("startTime"):
-            for key in ("startTime", "createTime", "start_time"):
-                if task.get(key):
-                    info["startTime"] = task.get(key)
-                    break
+        for key in ("status", "instanceStatus", "taskStatus"):
+            if task.get(key):
+                info["status"] = task.get(key)
+                break
+        # 启动时间（以任务列表中的 startTime/createTime 为准）
+        for key in ("startTime", "createTime", "start_time"):
+            if task.get(key):
+                info["startTime"] = task.get(key)
+                break
         # 超时时长
-        if not info.get("timeoutLimit") and task.get("timeoutLimit"):
+        if task.get("timeoutLimit"):
             info["timeoutLimit"] = task.get("timeoutLimit")
+        # 剩余时间（仅用于展示）
+        if task.get("remainingTime"):
+            info["remainingTime"] = task.get("remainingTime")
 
         if not info.get("instanceIp"):
             run_ips = self.get_run_ips(service_id)
