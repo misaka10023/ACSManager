@@ -45,23 +45,29 @@ def setup_logging(log_level: str) -> Path:
     return log_path
 
 
-def ensure_config(config_path: str, template_path: str = TEMPLATE_CONFIG) -> Path:
+def ensure_config(config_path: str, template_path: str = TEMPLATE_CONFIG) -> tuple[Path, bool]:
     """
     Ensure the target config exists; if missing, create directories and copy from template.
     """
     target = Path(config_path)
     if target.exists():
-        return target
+        return target, False
     template = Path(template_path)
     if not template.exists():
         raise FileNotFoundError(f"Config template not found: {template}")
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(template, target)
-    return target
+    return target, True
 
 
 async def run(config_path: str, log_level: str) -> None:
-    cfg_path = ensure_config(config_path)
+    cfg_path, created = ensure_config(config_path)
+    if created:
+        logging.error(
+            "Config file created at %s. Please fill it out and rerun. Exiting.",
+            cfg_path,
+        )
+        return
     store = ConfigStore(cfg_path)
     manager = ContainerManager(store)
     web_app.bind_manager(manager)
