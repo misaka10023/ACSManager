@@ -375,12 +375,17 @@ done
                 input=script.encode("utf-8"),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                timeout=8,
                 check=False,
             )
             if res.returncode != 0:
-                logger.debug("远端端口清理返回码 %s: %s", res.returncode, res.stderr.decode(errors="ignore"))
+                logger.info("远端端口清理返回码 %s: %s", res.returncode, res.stderr.decode(errors="ignore"))
+            else:
+                out = res.stdout.decode(errors="ignore").strip()
+                if out:
+                    logger.debug("远端端口清理输出: %s", out)
         except Exception as exc:
-            logger.debug("远端端口清理失败: %s", exc)
+            logger.info("远端端口清理失败: %s", exc)
             return
 
     def _remote_cleanup_ports(self, ports: List[int]) -> None:
@@ -487,6 +492,8 @@ done
                 if reverse_specs:
                     logger.info("尝试清理远端端口: container=%s, intermediate=%s", remote_ports, intermediate_ports)
                     self._reverse_cleanup_ports(remote_ports, intermediate_ports, ssh_cfg, target_ip)
+                    # 短暂停顿让远端清理完成
+                    await asyncio.sleep(1.0)
                 # 每次启动前都确保端口可用，并尝试清理同用户的 ssh 占用
                 if ports and not await self._ensure_ports_free(ports):
                     self.state["tunnel_status"] = "error"
