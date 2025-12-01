@@ -238,25 +238,9 @@ class ContainerManager:
         if mode == "double":
             if not bastion_host:
                 raise ValueError("double 模式需要 ssh.bastion_host 或 ssh.remote_server_ip。")
-            intermediate_port = ssh_cfg.get("intermediate_port")
-            if not intermediate_port:
-                raise ValueError("double 模式需要 ssh.intermediate_port 作为中间转发端口。")
-
-            def reverse_specs() -> List[Dict[str, int]]:
-                specs = ssh_cfg.get("reverse_forwards") or []
-                if not specs and local_open_port and container_open_port:
-                    specs = [{"local": local_open_port, "remote": container_open_port}]
-                result: List[Dict[str, int]] = []
-                for spec in specs:
-                    local = spec.get("local")
-                    remote = spec.get("remote")
-                    mid = spec.get("intermediate") or intermediate_port
-                    if not (local and remote and mid):
-                        raise ValueError("reverse_forwards 需要 local/remote/intermediate（三者必须有值）。")
-                    result.append({"local": int(local), "remote": int(remote), "mid": int(mid)})
-                return result
-
-            revs = reverse_specs()
+            revs = self._reverse_specs(ssh_cfg)
+            if any(spec.get("mid") is None for spec in revs):
+                raise ValueError("double 模式的反向转发需要 intermediate_port 或每条 reverse_forwards.intermediate。")
 
             outer: List[str] = ["ssh", "-T"] + keepalive
             add_port(outer, ssh_port)
@@ -421,6 +405,53 @@ done
                 jump=jump,
             )
 
+    def _reverse_cleanup_ports(self, remote_ports: List[int], intermediate_ports: List[int], ssh_cfg: Dict[str, Any], target_ip: Optional[str]) -> None:
+        """反向转发端口清理：跳板用中间端口，容器用远端端口。"""
+        mode = (ssh_cfg.get("mode") or "jump").lower()
+        bastion_host = ssh_cfg.get("bastion_host") or ssh_cfg.get("remote_server_ip")
+        bastion_user = ssh_cfg.get("bastion_user") or ssh_cfg.get("target_user") or "root"
+        target_user = ssh_cfg.get("target_user") or "root"
+        ssh_port = ssh_cfg.get("port")
+        container_port = ssh_cfg.get("container_port") or ssh_port
+
+        if bastion_host and intermediate_ports:
+            self._remote_kill_ports_on_host(
+                host=bastion_host,
+                user=bastion_user,
+                ports=intermediate_ports,
+                ssh_port=ssh_port,
+                jump=None,
+            )
+        if target_ip and remote_ports:
+            jump = f"{bastion_user}@{bastion_host}" if bastion_host and mode in {"jump", "double"} else None
+            self._remote_kill_ports_on_host(
+                host=target_ip,
+                user=target_user,
+                ports=remote_ports,
+                ssh_port=container_port,
+                jump=jump,
+            )
+
+    def _reverse_specs(self, ssh_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        构造反向转发规格：
+        - reverse_forwards 列表项：local(本地)->remote(容器)，可选 intermediate(跳板)
+        - 若 reverse_forwards 为空，则默认使用 container_open_port/local_open_port
+        """
+        local_open_port = ssh_cfg.get("local_open_port")
+        container_open_port = ssh_cfg.get("container_open_port")
+        intermediate_port = ssh_cfg.get("intermediate_port")
+        revs = ssh_cfg.get("reverse_forwards") or []
+        specs: List[Dict[str, Any]] = []
+        if not revs and local_open_port and container_open_port:
+            revs = [{"local": local_open_port, "remote": container_open_port}]
+        for spec in revs:
+            local = spec.get("local")
+            remote = spec.get("remote")
+            mid = spec.get("intermediate") or intermediate_port
+            specs.append({"local": int(local), "remote": int(remote), "mid": int(mid) if mid else None})
+        return specs
+
     async def _ensure_ports_free(self, ports: List[int], retries: int = 3, delay: float = 1.0) -> bool:
         """在隧道重连时，重试释放端口后再启动。"""
         for attempt in range(retries):
@@ -439,13 +470,20 @@ done
             if self._tunnel_process and self._tunnel_process.returncode is None:
                 return
             try:
-                cmd = self.build_tunnel_command()
                 ssh_cfg = self._ssh_cfg(reload=True)
+                target_ip = self.state.get("container_ip") or ssh_cfg.get("container_ip")
+                reverse_specs = self._reverse_specs(ssh_cfg)
                 ports = self._forward_ports(ssh_cfg)
+                # 远程反向转发端口预清理（容器端 & 跳板中间端口）
+                remote_ports = [spec["remote"] for spec in reverse_specs if spec.get("remote")]
+                intermediate_ports = [spec["mid"] for spec in reverse_specs if spec.get("mid")]
+                if reverse_specs:
+                    self._reverse_cleanup_ports(remote_ports, intermediate_ports, ssh_cfg, target_ip)
                 # 每次启动前都确保端口可用，并尝试清理同用户的 ssh 占用
                 if ports and not await self._ensure_ports_free(ports):
                     self.state["tunnel_status"] = "error"
                     return
+                cmd = self.build_tunnel_command()
             except Exception as exc:
                 logger.error("无法构建隧道命令: %s", exc)
                 self.state["tunnel_status"] = "error"
