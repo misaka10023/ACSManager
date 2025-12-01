@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse
 
 from acs_manager.config.store import ConfigStore
 from acs_manager.management.controller import ContainerManager
@@ -38,12 +39,51 @@ def state() -> dict:
 
 
 @app.get("/")
-def root() -> dict:
-    """Simple landing endpoint to avoid 404 at root."""
-    return {
-        "message": "ACS Manager Web UI",
-        "endpoints": ["/health", "/state", "/config", "/container-ip", "/logs"],
-    }
+def root() -> HTMLResponse:
+    """Simple UI landing page."""
+    html = """
+    <!DOCTYPE html>
+    <html lang="zh-CN">
+    <head><meta charset="UTF-8"><title>ACS Manager</title></head>
+    <body>
+      <h2>ACS Manager Web UI</h2>
+      <p><a href="/health" target="_blank">/health</a></p>
+      <p><a href="/state" target="_blank">/state</a></p>
+      <p><a href="/config" target="_blank">GET /config</a></p>
+      <p><a href="/logs" target="_blank">GET /logs</a></p>
+      <h3>配置修改</h3>
+      <form id="cfgForm">
+        <textarea id="cfg" rows="20" cols="80"></textarea><br/>
+        <button type="button" onclick="save()">保存 (PUT /config)</button>
+      </form>
+      <pre id="msg"></pre>
+      <script>
+        async function loadCfg() {
+          const res = await fetch('/config');
+          const data = await res.json();
+          document.getElementById('cfg').value = JSON.stringify(data, null, 2);
+        }
+        async function save() {
+          const txt = document.getElementById('cfg').value;
+          try {
+            const json = JSON.parse(txt);
+            const res = await fetch('/config', {
+              method: 'PUT',
+              headers: {'Content-Type':'application/json'},
+              body: JSON.stringify(json)
+            });
+            const data = await res.json();
+            document.getElementById('msg').textContent = JSON.stringify(data, null, 2);
+          } catch (e) {
+            document.getElementById('msg').textContent = e.toString();
+          }
+        }
+        loadCfg();
+      </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
 
 
 @app.get("/container-ip")

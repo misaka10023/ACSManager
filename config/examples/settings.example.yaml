@@ -2,6 +2,7 @@
 
 acs:
   base_url: "https://acs.example.com"          # ACS 控制台地址
+  api_prefix: "/sothisai"                      # API 前缀，如果无则留空
   login_user: "your-acs-username"              # 登录用户名
   login_password: "change-me"                  # 登录密码
   user_type: "os"                              # 登录用户类型（前端下拉：os/gridview 等）

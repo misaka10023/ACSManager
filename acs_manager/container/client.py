@@ -30,8 +30,12 @@ class ContainerClient:
     def __init__(self, store: ConfigStore) -> None:
         self.store = store
         self.session = requests.Session()
-        self.base_url = self._acs_cfg().get("base_url", "").rstrip("/")
-        self.session.verify = self._acs_cfg().get("verify_ssl", True)
+        cfg = self._acs_cfg()
+        self.base_url = cfg.get("base_url", "").rstrip("/")
+        self.api_prefix = (cfg.get("api_prefix") or "").rstrip("/")
+        self.session.verify = cfg.get("verify_ssl", True)
+        if not self.session.verify:
+            requests.packages.urllib3.disable_warnings()  # type: ignore
 
     def _acs_cfg(self, reload: bool = False) -> Dict[str, Any]:
         return self.store.get_section("acs", default={}, reload=reload)
@@ -51,6 +55,12 @@ class ContainerClient:
         for k, v in cookies.items():
             self.session.cookies.set(k, v)
 
+    def _url(self, path: str) -> str:
+        prefix = f"{self.api_prefix}" if self.api_prefix else ""
+        if prefix and not prefix.startswith("/"):
+            prefix = "/" + prefix
+        return f"{self.base_url}{prefix}{path}"
+
     def login(self, auth_code: str = "") -> LoginResult:
         cfg = self._acs_cfg(reload=True)
         username = cfg.get("login_user", "")
@@ -59,6 +69,9 @@ class ContainerClient:
         public_key_b64 = cfg.get("public_key", "")
         preset_cookies = cfg.get("cookies", {}) or {}
         self.session.verify = cfg.get("verify_ssl", True)
+        self.api_prefix = (cfg.get("api_prefix") or "").rstrip("/")
+        if not self.session.verify:
+            requests.packages.urllib3.disable_warnings()  # type: ignore
 
         if preset_cookies:
             # 直接复用配置中的 Cookie
@@ -69,7 +82,7 @@ class ContainerClient:
             raise ValueError("缺少 ACS 登录配置（用户名/密码/公钥/base_url）")
 
         # 预热 session
-        self.session.get(f"{self.base_url}/login.html")
+        self.session.get(self._url("/login.html"))
 
         enc_pwd = self._encrypt_password(password, public_key_b64)
         payload = {
@@ -79,7 +92,7 @@ class ContainerClient:
             "authCode": auth_code,
             "encrypted": True,
         }
-        resp = self.session.post(f"{self.base_url}/login/loginAuth.action", data=payload)
+        resp = self.session.post(self._url("/login/loginAuth.action"), data=payload)
         resp.raise_for_status()
         data = resp.json()
         cookies = self.session.cookies.get_dict()
@@ -98,21 +111,21 @@ class ContainerClient:
         """
         Fetch instance IP information via instance-service.
         """
-        url = f"{self.base_url}/api/instance-service/{instance_id}/run-ips"
+        url = self._url(f"/api/instance-service/{instance_id}/run-ips")
         resp = self.session.get(url)
         resp.raise_for_status()
         return resp.json()
 
     def list_tasks(self, start: int = 0, limit: int = 50, sort: str = "DESC") -> Dict[str, Any]:
         """List container tasks (instance-service task endpoint)."""
-        url = f"{self.base_url}/sothisai/api/instance-service/task"
+        url = self._url("/api/instance-service/task")
         resp = self.session.get(url, params={"start": start, "limit": limit, "sort": sort})
         resp.raise_for_status()
         return resp.json()
 
     def get_run_ips(self, instance_service_id: str) -> Dict[str, Any]:
         """Fetch run-ips by instance service id."""
-        url = f"{self.base_url}/sothisai/api/instance-service/{instance_service_id}/run-ips"
+        url = self._url(f"/api/instance-service/{instance_service_id}/run-ips")
         resp = self.session.get(url)
         resp.raise_for_status()
         return resp.json()
@@ -154,7 +167,7 @@ class ContainerClient:
         """
         Call restart API for a task/instance.
         """
-        url = f"{self.base_url}/sothisai/api/instance-service/task/actions/restart"
+        url = self._url("/api/instance-service/task/actions/restart")
         resp = self.session.post(url, json={"id": task_id})
         resp.raise_for_status()
         return resp.json()
