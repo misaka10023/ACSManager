@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
+import datetime as dt
 import requests
 from Crypto.Cipher import PKCS1_v1_5
 from Crypto.PublicKey import RSA
@@ -166,18 +167,44 @@ class ContainerClient:
         return resp.json()
 
     def find_instance_by_name(self, name: str, *, start: int = 0, limit: int = 50) -> Optional[Dict[str, Any]]:
-        """按名称匹配任务，返回第一条匹配记录。"""
+        """
+        按名称匹配任务，返回“最新”的一条匹配记录。
+
+        匹配规则：
+        - 先筛出名称匹配的任务（instanceServiceName/taskName/notebookName/name 中任一包含/等于目标）
+        - 在这些候选中，按 startTime/createTime 解析后的时间从新到旧排序，返回最新一条
+        """
         target = name.strip().lower()
         data = self.list_tasks(start=start, limit=limit)
+        candidates: List[Dict[str, Any]] = []
         for item in data.get("data", []):
             for key in ("instanceServiceName", "taskName", "notebookName", "name"):
                 cand = str(item.get(key, "")).strip()
                 cand_l = cand.lower()
                 if not cand:
                     continue
-                if cand_l == target or target in cand_l or cand_l.startswith(target):
-                    return item
-        return None
+                if cand_l == target or cand_l.startswith(target) or target in cand_l:
+                    candidates.append(item)
+                    break
+        if not candidates:
+            return None
+
+        def _parse_time(item: Dict[str, Any]) -> dt.datetime:
+            for k in ("startTime", "createTime"):
+                v = item.get(k)
+                if not v:
+                    continue
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
+                    try:
+                        return dt.datetime.strptime(str(v), fmt)
+                    except ValueError:
+                        continue
+            # 无法解析时间时，放到最旧
+            return dt.datetime.min
+
+        # 选择时间最新的候选
+        best = max(candidates, key=_parse_time)
+        return best
 
     def get_container_instance_info_by_name(self, name: str) -> Optional[Dict[str, Any]]:
         """按任务/容器名获取详情，优先 container-monitor，缺失字段时从任务列表补充。

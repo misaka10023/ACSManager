@@ -61,7 +61,7 @@
       el.textContent = JSON.stringify(data, null, 2);
       if (meta) {
         if (data.remaining_time_str && data.next_shutdown) {
-          meta.textContent = `剩余时间: ${data.remaining_time_str}（预计自动停止时间: ${data.next_shutdown}）`;
+          meta.innerHTML = `剩余时间: ${data.remaining_time_str}<br/>预计自动停止时间: ${data.next_shutdown}`;
         } else if (data.remaining_time_str) {
           meta.textContent = `剩余时间: ${data.remaining_time_str}`;
         } else if (data.next_shutdown) {
