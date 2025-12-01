@@ -188,7 +188,6 @@ class ContainerManager:
         target_user = ssh_cfg.get("target_user", "root")
         bastion_host = ssh_cfg.get("bastion_host") or ssh_cfg.get("remote_server_ip")
         bastion_user = ssh_cfg.get("bastion_user") or target_user
-        identity_file = ssh_cfg.get("identity_file")
         ssh_port = ssh_cfg.get("port")
         password_login = ssh_cfg.get("password_login")
         password = ssh_cfg.get("password")
@@ -230,10 +229,6 @@ class ContainerManager:
             if not reverse and default_remote and local_open_port and container_open_port:
                 base.extend(["-R", f"{container_open_port}:localhost:{local_open_port}"])
 
-        def add_identity(base: List[str]) -> None:
-            if identity_file:
-                base.extend(["-i", identity_file])
-
         def add_port(base: List[str], port_value: Any) -> None:
             if port_value:
                 base.extend(["-p", str(port_value)])
@@ -245,14 +240,12 @@ class ContainerManager:
                 raise ValueError("double 模式需要 ssh.bastion_host 或 ssh.remote_server_ip。")
             outer: List[str] = ["ssh", "-T"] + keepalive
             add_port(outer, ssh_port)
-            add_identity(outer)
             # 本地正向转发（如有）在外层执行
             add_forwards(outer, default_remote=False)
             outer.append(f"{bastion_user}@{bastion_host}")
             # 内层保持连接并在容器侧打开反向转发
             inner: List[str] = ["ssh", "-T", "-N"] + keepalive
             add_port(inner, ssh_cfg.get("container_port") or ssh_port)
-            add_identity(inner)
             add_remote_forwards(inner, default_remote=True)
             inner.append(f"{target_user}@{target_ip}")
             outer.append(" ".join(inner))
@@ -260,7 +253,6 @@ class ContainerManager:
         else:
             cmd: List[str] = ["ssh", "-T", "-N"] + keepalive
             add_port(cmd, ssh_port)
-            add_identity(cmd)
             if mode == "jump":
                 if not bastion_host:
                     raise ValueError("jump 模式需要 ssh.bastion_host 或 ssh.remote_server_ip。")
@@ -341,15 +333,12 @@ class ContainerManager:
         user: str,
         ports: List[int],
         ssh_port: Optional[int],
-        identity_file: Optional[str],
         jump: Optional[str] = None,
     ) -> None:
         """在远端主机上强杀占用指定端口的进程（依赖 ssh、ss 或 fuser）。"""
         if not host or not user or not ports:
             return
         cmd = ["ssh", "-T"]
-        if identity_file:
-            cmd += ["-i", identity_file]
         if jump:
             cmd += ["-J", jump]
         if ssh_port:
@@ -384,7 +373,6 @@ done
         bastion_host = ssh_cfg.get("bastion_host") or ssh_cfg.get("remote_server_ip")
         bastion_user = ssh_cfg.get("bastion_user") or ssh_cfg.get("target_user") or "root"
         target_user = ssh_cfg.get("target_user") or "root"
-        identity_file = ssh_cfg.get("identity_file")
         ssh_port = ssh_cfg.get("port")
         container_port = ssh_cfg.get("container_port") or ssh_port
         target_ip = self.state.get("container_ip") or ssh_cfg.get("container_ip")
@@ -395,7 +383,6 @@ done
                 user=bastion_user,
                 ports=ports,
                 ssh_port=ssh_port,
-                identity_file=identity_file,
                 jump=None,
             )
         if target_ip:
@@ -405,7 +392,6 @@ done
                 user=target_user,
                 ports=ports,
                 ssh_port=container_port,
-                identity_file=identity_file,
                 jump=jump,
             )
 
