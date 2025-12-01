@@ -30,6 +30,7 @@ class ContainerManager:
         self._tunnel_process: Optional[Process] = None
         self._proc_lock = asyncio.Lock()
         self._stop_requested = False
+        self._tunnel_started_once = False
 
     async def handle_new_ip(self, ip: str) -> None:
         """Update state when the sniffer reports a fresh IP and restart tunnel."""
@@ -236,9 +237,22 @@ class ContainerManager:
                 try:
                     s.bind(("127.0.0.1", p))
                 except OSError:
-                    logger.error("本地端口 %s 已被占用，请检查残留 ssh 进程后重试。", p)
+                    logger.error("本地端口 %s 已被占用，尝试自动清理/重试。", p)
                     return False
         return True
+
+    async def _ensure_ports_free(self, ports: List[int], retries: int = 3, delay: float = 1.0) -> bool:
+        """
+        Retry freeing ports (by ensuring我们自己的隧道已停) before giving up.
+        """
+        for attempt in range(retries):
+            if self._ports_available(ports):
+                return True
+            # 尝试停止已有隧道，等待端口释放
+            await self.stop_tunnel()
+            if attempt < retries - 1:
+                await asyncio.sleep(delay)
+        return self._ports_available(ports)
 
     async def start_tunnel(self) -> None:
         """Start the SSH tunnel process if not already running."""
@@ -249,9 +263,10 @@ class ContainerManager:
                 cmd = self.build_tunnel_command()
                 ssh_cfg = self._ssh_cfg(reload=True)
                 ports = self._forward_ports(ssh_cfg)
-                if ports and not self._ports_available(ports):
-                    self.state["tunnel_status"] = "error"
-                    return
+                if self._tunnel_started_once and ports:
+                    if not await self._ensure_ports_free(ports):
+                        self.state["tunnel_status"] = "error"
+                        return
             except Exception as exc:
                 logger.error("Cannot build tunnel command: %s", exc)
                 self.state["tunnel_status"] = "error"
@@ -261,6 +276,7 @@ class ContainerManager:
             proc = await asyncio.create_subprocess_exec(*cmd)
             self._tunnel_process = proc
             self.state["tunnel_status"] = "running"
+            self._tunnel_started_once = True
 
     async def stop_tunnel(self) -> None:
         """Stop the SSH tunnel process and ensure port cleanup."""
