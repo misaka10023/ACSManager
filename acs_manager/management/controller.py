@@ -216,6 +216,20 @@ class ContainerManager:
             if default_remote and local_open_port and container_open_port:
                 base.extend(["-R", f"{container_open_port}:localhost:{local_open_port}"])
 
+        def add_remote_forwards(
+            base: List[str],
+            *,
+            default_remote: bool = False,
+        ) -> None:
+            reverse = ssh_cfg.get("reverse_forwards") or []
+            for spec in reverse:
+                local = spec.get("local")
+                remote = spec.get("remote")
+                if local and remote:
+                    base.extend(["-R", f"{remote}:localhost:{local}"])
+            if not reverse and default_remote and local_open_port and container_open_port:
+                base.extend(["-R", f"{container_open_port}:localhost:{local_open_port}"])
+
         def add_identity(base: List[str]) -> None:
             if identity_file:
                 base.extend(["-i", identity_file])
@@ -229,14 +243,20 @@ class ContainerManager:
         if mode == "double":
             if not bastion_host:
                 raise ValueError("double 模式需要 ssh.bastion_host 或 ssh.remote_server_ip。")
-            cmd: List[str] = ["ssh", "-T", "-N"] + keepalive
-            add_port(cmd, ssh_cfg.get("container_port") or ssh_port)
-            add_identity(cmd)
-            # 通过 ProxyCommand 走跳板机
-            proxy_cmd = f"ssh -W %h:%p {bastion_user}@{bastion_host}"
-            cmd.extend(["-o", f"ProxyCommand={proxy_cmd}"])
-            add_forwards(cmd, remote_host="localhost", default_remote=True)
-            cmd.append(f"{target_user}@{target_ip}")
+            outer: List[str] = ["ssh", "-T"] + keepalive
+            add_port(outer, ssh_port)
+            add_identity(outer)
+            # 本地正向转发（如有）在外层执行
+            add_forwards(outer, default_remote=False)
+            outer.append(f"{bastion_user}@{bastion_host}")
+            # 内层保持连接并在容器侧打开反向转发
+            inner: List[str] = ["ssh", "-T", "-N"] + keepalive
+            add_port(inner, ssh_cfg.get("container_port") or ssh_port)
+            add_identity(inner)
+            add_remote_forwards(inner, default_remote=True)
+            inner.append(f"{target_user}@{target_ip}")
+            outer.append(" ".join(inner))
+            cmd = outer
         else:
             cmd: List[str] = ["ssh", "-T", "-N"] + keepalive
             add_port(cmd, ssh_port)
@@ -245,7 +265,8 @@ class ContainerManager:
                 if not bastion_host:
                     raise ValueError("jump 模式需要 ssh.bastion_host 或 ssh.remote_server_ip。")
                 cmd.extend(["-J", f"{bastion_user}@{bastion_host}"])
-            add_forwards(cmd, default_remote=True)
+            add_forwards(cmd, default_remote=False)
+            add_remote_forwards(cmd, default_remote=True)
             cmd.append(f"{target_user}@{target_ip}")
 
         if password_login and password:
@@ -262,17 +283,16 @@ class ContainerManager:
         return ["ssh", "-o", "ExitOnForwardFailure=yes", "-N"] + base[1:]
 
     def _forward_ports(self, ssh_cfg: Dict[str, Any]) -> List[int]:
-        """收集需要监听的本地端口。"""
+        """
+        收集需要本地监听的端口（仅针对 -L 正向转发）。
+        反向转发 -R 不在本地绑定端口，不需要检测占用。
+        """
         ports: List[int] = []
         forwards = ssh_cfg.get("forwards") or []
         for spec in forwards:
             local = spec.get("local")
             if local:
                 ports.append(int(local))
-        if not ports:
-            local_open_port = ssh_cfg.get("local_open_port")
-            if local_open_port:
-                ports.append(int(local_open_port))
         return ports
 
     def _ports_available(self, ports: List[int]) -> bool:
