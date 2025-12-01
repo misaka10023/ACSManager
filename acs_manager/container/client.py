@@ -124,6 +124,15 @@ class ContainerClient:
         resp.raise_for_status()
         data = resp.json()
         cookies = self.session.cookies.get_dict()
+        # Persist最新 cookies 到配置文件，便于后续复用
+        if cookies:
+            try:
+                current_cfg = self._acs_cfg(reload=False)
+                new_acs = dict(current_cfg)
+                new_acs["cookies"] = cookies
+                self.store.update({"acs": new_acs})
+            except Exception:
+                pass
         return LoginResult(
             success=bool(data.get("success")),
             role_id=data.get("roleId"),
