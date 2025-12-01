@@ -81,8 +81,6 @@ SSH mode examples:
 - `acs.public_key`: RSA public key (Base64) for password encryption when logging in.
 - `acs.cookies`: optional preset cookies (JSESSIONID/GV_JSESSIONID); leave empty to auto-login.
 - `acs.container_name`: identifier for the container (e.g., E2SRLF).
-- `acs.shutdown_hours`: expected auto-shutdown window (360h default).
-- `acs.terminal_selector`: DOM selector for the embedded terminal (for automation).
 - Capture filters are hard-coded in code; no capture.* config is required.
 - `ssh.mode`: `direct` | `jump` (-J) | `double` (two-hop ssh through bastion).
 - `ssh.remote_server_ip` or `ssh.bastion_host`: jump host / remote server IP for double SSH.

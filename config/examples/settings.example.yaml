@@ -10,8 +10,6 @@ acs:
     JSESSIONID: ""
     GV_JSESSIONID: ""
   container_name: "acs-container"              # 容器名称（如 E2SRLF）
-  shutdown_hours: 360                           # 容器自动关机的小时数
-  terminal_selector: "#terminal"               # 网页终端的 DOM 选择器
 
 ssh:
   mode: "jump"                                 # ssh 模式：direct(直连) | jump(-J) | double(两段 ssh)
@@ -27,8 +25,8 @@ ssh:
   local_open_port: 7890                         # 本地端口（本地代理软件监听）
   container_open_port: 7890                     # 容器内监听端口（需容器开放）
   forwards:                                     # 额外转发列表，remote 为容器端口
-    - local: 7890
-      remote: 7890
+    - local: 7891
+      remote: 7892
     - local: 8022
       remote: 22
 

@@ -92,7 +92,6 @@ class ContainerManager:
         """
         acs_cfg = self._acs_cfg(reload=True)
         name = acs_cfg.get("container_name")
-        shutdown_hours = acs_cfg.get("shutdown_hours", 360)
         if not name:
             logger.warning("No container_name configured; monitor_container exiting.")
             return
@@ -109,12 +108,18 @@ class ContainerManager:
                     if ip:
                         await self.handle_new_ip(ip)
 
-                    start_dt = self._parse_start_time(start_time_str)
-                    if start_dt:
-                        next_shutdown = start_dt + dt.timedelta(hours=shutdown_hours)
-                        threshold = next_shutdown - dt.timedelta(minutes=pre_shutdown_minutes)
-                        now = dt.datetime.utcnow()
-                        interval = fast_interval if now >= threshold else slow_interval
+        start_dt = self._parse_start_time(start_time_str)
+        if start_dt and info.get("timeoutLimit"):
+            # timeoutLimit format: "360:00:00"
+            try:
+                hours, minutes, seconds = info["timeoutLimit"].split(":")
+                delta = dt.timedelta(hours=int(hours), minutes=int(minutes), seconds=int(seconds))
+                next_shutdown = start_dt + delta
+                threshold = next_shutdown - dt.timedelta(minutes=pre_shutdown_minutes)
+                now = dt.datetime.utcnow()
+                interval = fast_interval if now >= threshold else slow_interval
+            except Exception:
+                interval = slow_interval
                     if status and status.lower() in {"terminated", "stopped", "stop", "failed"}:
                         logger.warning("Container %s status %s -> attempting restart", name, status)
                         await self.restart_container()
