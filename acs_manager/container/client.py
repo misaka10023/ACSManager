@@ -180,7 +180,15 @@ class ContainerClient:
         return None
 
     def get_container_instance_info_by_name(self, name: str) -> Optional[Dict[str, Any]]:
-        """按任务/容器名获取详情，优先 container-monitor，缺失 IP 时再查 run-ips。"""
+        """按任务/容器名获取详情，优先 container-monitor，缺失字段时从任务列表补充。
+
+        返回的 info 中会尽量包含：
+        - instanceIp
+        - status
+        - startTime
+        - timeoutLimit
+        - instanceServiceId
+        """
         task = self.find_instance_by_name(name)
         if not task:
             return None
@@ -196,6 +204,24 @@ class ContainerClient:
                 info = monitor
         if not info:
             return None
+
+        # 优先使用 container-monitor 的字段，缺失时从任务记录补充
+        # 状态字段
+        if not info.get("status"):
+            for key in ("status", "instanceStatus", "taskStatus"):
+                if task.get(key):
+                    info["status"] = task.get(key)
+                    break
+        # 启动时间
+        if not info.get("startTime"):
+            for key in ("startTime", "createTime", "start_time"):
+                if task.get(key):
+                    info["startTime"] = task.get(key)
+                    break
+        # 超时时长
+        if not info.get("timeoutLimit") and task.get("timeoutLimit"):
+            info["timeoutLimit"] = task.get("timeoutLimit")
+
         if not info.get("instanceIp"):
             run_ips = self.get_run_ips(service_id)
             ips = run_ips.get("data") or []
