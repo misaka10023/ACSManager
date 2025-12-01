@@ -238,15 +238,41 @@ class ContainerManager:
         if mode == "double":
             if not bastion_host:
                 raise ValueError("double 模式需要 ssh.bastion_host 或 ssh.remote_server_ip。")
+            intermediate_port = ssh_cfg.get("intermediate_port")
+            if not intermediate_port:
+                raise ValueError("double 模式需要 ssh.intermediate_port 作为中间转发端口。")
+
+            def reverse_specs() -> List[Dict[str, int]]:
+                specs = ssh_cfg.get("reverse_forwards") or []
+                if not specs and local_open_port and container_open_port:
+                    specs = [{"local": local_open_port, "remote": container_open_port}]
+                result: List[Dict[str, int]] = []
+                for spec in specs:
+                    local = spec.get("local")
+                    remote = spec.get("remote")
+                    mid = spec.get("intermediate") or intermediate_port
+                    if not (local and remote and mid):
+                        raise ValueError("reverse_forwards 需要 local/remote/intermediate（三者必须有值）。")
+                    result.append({"local": int(local), "remote": int(remote), "mid": int(mid)})
+                return result
+
+            revs = reverse_specs()
+
             outer: List[str] = ["ssh", "-T"] + keepalive
             add_port(outer, ssh_port)
             # 本地正向转发（如有）在外层执行
             add_forwards(outer, default_remote=False)
+            # 外层负责将本地端口暴露到跳板的中间端口
+            for spec in revs:
+                outer.extend(["-R", f"{spec['mid']}:localhost:{spec['local']}"])
             outer.append(f"{bastion_user}@{bastion_host}")
             # 内层保持连接并在容器侧打开反向转发
             inner: List[str] = ["ssh", "-T", "-N"] + keepalive
             add_port(inner, ssh_cfg.get("container_port") or ssh_port)
-            add_remote_forwards(inner, default_remote=True)
+            add_remote_forwards(inner, default_remote=False)
+            # 内层将容器端口指向跳板中间端口
+            for spec in revs:
+                inner.extend(["-R", f"{spec['remote']}:localhost:{spec['mid']}"])
             inner.append(f"{target_user}@{target_ip}")
             outer.append(" ".join(inner))
             cmd = outer

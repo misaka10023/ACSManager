@@ -25,14 +25,16 @@ ssh:
   password: ""                             # 密码登录密码（生产环境请替换）
   local_open_port: 7890                    # 本地端口（本地代理软件监听）
   container_open_port: 7890                # 容器内监听端口
+  intermediate_port: 17890                 # 双层 ssh 反向转发中间端口（跳板上临时端口）
 #  forwards:                                # 额外正向转发列表 (-L)，remote 为远端端口
 #    - local: 7891
 #      remote: 7892
 #    - local: 8022
 #      remote: 22
-#  reverse_forwards:                        # 额外反向转发列表 (-R)，remote 为远端监听端口；为空则默认 -R container_open_port:localhost:local_open_port
-#    - local: 9000      # 本地端口
-#      remote: 9000     # 远端监听端口（容器侧）
+#  reverse_forwards:                        # 额外反向转发列表；double 模式需要提供 intermediate
+#    - local: 9000       # 本地端口
+#      remote: 9000      # 远端监听端口（容器侧）
+#      intermediate: 19000 # 跳板中间端口，不填则使用 intermediate_port
 
 webui:
   host: "0.0.0.0"                          # Web UI 绑定地址
