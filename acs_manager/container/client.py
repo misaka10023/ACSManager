@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
@@ -59,14 +59,14 @@ class ContainerClient:
         preset_cookies = cfg.get("cookies", {}) or {}
 
         if preset_cookies:
-            # 鐩存帴澶嶇敤閰嶇疆涓殑 Cookie
+            # 直接复用配置中的 Cookie
             self._seed_cookies(preset_cookies)
             return LoginResult(True, None, self.session.cookies.get_dict(), {"msg": "use preset cookies"})
 
         if not username or not password or not public_key_b64 or not self.base_url:
-            raise ValueError("缂哄皯 ACS 鐧诲綍閰嶇疆锛堢敤鎴峰悕/瀵嗙爜/鍏挜/base_url锛?)
+            raise ValueError("缺少 ACS 登录配置（用户名/密码/公钥/base_url）")
 
-        # 棰勭儹 session
+        # 预热 session
         self.session.get(f"{self.base_url}/login.html")
 
         enc_pwd = self._encrypt_password(password, public_key_b64)
