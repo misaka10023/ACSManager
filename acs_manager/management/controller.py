@@ -213,6 +213,33 @@ class ContainerManager:
         base = self.build_ssh_command()
         return ["ssh", "-o", "ExitOnForwardFailure=yes", "-N"] + base[1:]
 
+    def _forward_ports(self, ssh_cfg: Dict[str, Any]) -> List[int]:
+        """Collect local ports that will be bound by SSH forwards."""
+        ports: List[int] = []
+        forwards = ssh_cfg.get("forwards") or []
+        for spec in forwards:
+            local = spec.get("local")
+            if local:
+                ports.append(int(local))
+        if not ports:
+            local_open_port = ssh_cfg.get("local_open_port")
+            if local_open_port:
+                ports.append(int(local_open_port))
+        return ports
+
+    def _ports_available(self, ports: List[int]) -> bool:
+        """Check local port availability by attempting bind."""
+        import socket
+
+        for p in ports:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                try:
+                    s.bind(("127.0.0.1", p))
+                except OSError:
+                    logger.error("本地端口 %s 已被占用，请检查残留 ssh 进程后重试。", p)
+                    return False
+        return True
+
     async def start_tunnel(self) -> None:
         """Start the SSH tunnel process if not already running."""
         async with self._proc_lock:
@@ -220,6 +247,11 @@ class ContainerManager:
                 return
             try:
                 cmd = self.build_tunnel_command()
+                ssh_cfg = self._ssh_cfg(reload=True)
+                ports = self._forward_ports(ssh_cfg)
+                if ports and not self._ports_available(ports):
+                    self.state["tunnel_status"] = "error"
+                    return
             except Exception as exc:
                 logger.error("Cannot build tunnel command: %s", exc)
                 self.state["tunnel_status"] = "error"
