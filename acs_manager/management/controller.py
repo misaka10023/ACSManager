@@ -357,10 +357,12 @@ class ContainerManager:
         cmd += ["bash", "-s"]
         plist = " ".join(str(p) for p in ports)
         script = f"""
+if command -v sudo >/dev/null 2>&1; then PREF="sudo -n"; else PREF=""; fi
 for p in {plist}; do
-  if command -v sudo >/dev/null 2>&1; then PREF="sudo -n"; else PREF=""; fi
   if command -v ss >/dev/null 2>&1; then
     $PREF ss -ltnp | grep ":$p" | awk -F'pid=' '{{print $2}}' | awk '{{print $1}}' | tr -d ',' | xargs -r $PREF kill -9
+  elif command -v netstat >/dev/null 2>&1; then
+    $PREF netstat -tnlp 2>/dev/null | awk -v port=":$p" '$4 ~ port"$" {for(i=1;i<=NF;i++){if($i~"/"){split($i,a,\"/\"); print a[1]}}}' | xargs -r $PREF kill -9
   fi
   if command -v fuser >/dev/null 2>&1; then
     $PREF fuser -k ${{p}}/tcp
