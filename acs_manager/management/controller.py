@@ -4,6 +4,7 @@ import asyncio
 import datetime as dt
 import getpass
 import logging
+import subprocess
 from asyncio.subprocess import Process
 from typing import Any, Dict, List, Optional
 
@@ -306,6 +307,81 @@ class ContainerManager:
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
 
+    def _remote_kill_ports_on_host(
+        self,
+        *,
+        host: str,
+        user: str,
+        ports: List[int],
+        ssh_port: Optional[int],
+        identity_file: Optional[str],
+        jump: Optional[str] = None,
+    ) -> None:
+        """在远端主机上强杀占用指定端口的进程（依赖 ssh、ss 或 fuser）。"""
+        if not host or not user or not ports:
+            return
+        cmd = ["ssh", "-T"]
+        if identity_file:
+            cmd += ["-i", identity_file]
+        if jump:
+            cmd += ["-J", jump]
+        if ssh_port:
+            cmd += ["-p", str(ssh_port)]
+        cmd.append(f"{user}@{host}")
+        cmd += ["bash", "-s"]
+        plist = " ".join(str(p) for p in ports)
+        script = f"""
+for p in {plist}; do
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnp | grep ":$p" | awk -F'pid=' '{{print $2}}' | awk '{{print $1}}' | tr -d ',' | xargs -r kill -9
+  elif command -v fuser >/dev/null 2>&1; then
+    fuser -k ${{p}}/tcp
+  fi
+done
+"""
+        try:
+            subprocess.run(
+                cmd,
+                input=script.encode("utf-8"),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        except Exception:
+            return
+
+    def _remote_cleanup_ports(self, ports: List[int]) -> None:
+        """尝试在跳板/容器上清理占用同端口的进程。"""
+        ssh_cfg = self._ssh_cfg(reload=True)
+        mode = (ssh_cfg.get("mode") or "jump").lower()
+        bastion_host = ssh_cfg.get("bastion_host") or ssh_cfg.get("remote_server_ip")
+        bastion_user = ssh_cfg.get("bastion_user") or ssh_cfg.get("target_user") or "root"
+        target_user = ssh_cfg.get("target_user") or "root"
+        identity_file = ssh_cfg.get("identity_file")
+        ssh_port = ssh_cfg.get("port")
+        container_port = ssh_cfg.get("container_port") or ssh_port
+        target_ip = self.state.get("container_ip") or ssh_cfg.get("container_ip")
+
+        if bastion_host:
+            self._remote_kill_ports_on_host(
+                host=bastion_host,
+                user=bastion_user,
+                ports=ports,
+                ssh_port=ssh_port,
+                identity_file=identity_file,
+                jump=None,
+            )
+        if target_ip:
+            jump = f"{bastion_user}@{bastion_host}" if bastion_host and mode in {"jump", "double"} else None
+            self._remote_kill_ports_on_host(
+                host=target_ip,
+                user=target_user,
+                ports=ports,
+                ssh_port=container_port,
+                identity_file=identity_file,
+                jump=jump,
+            )
+
     async def _ensure_ports_free(self, ports: List[int], retries: int = 3, delay: float = 1.0) -> bool:
         """在隧道重连时，重试释放端口后再启动。"""
         for attempt in range(retries):
@@ -313,6 +389,7 @@ class ContainerManager:
                 return True
             await self.stop_tunnel()
             self._kill_ssh_on_ports(ports)
+            self._remote_cleanup_ports(ports)
             if attempt < retries - 1:
                 await asyncio.sleep(delay)
         return self._ports_available(ports)
