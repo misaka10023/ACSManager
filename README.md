@@ -83,7 +83,7 @@ SSH mode examples:
 - `acs.container_name`: identifier for the container (e.g., E2SRLF).
 - Capture filters are hard-coded in code; no capture.* config is required.
 - `ssh.mode`: `direct` | `jump` (-J) | `double` (two-hop ssh through bastion).
-- `ssh.remote_server_ip` or `ssh.bastion_host`: jump host / remote server IP for double SSH.
+- `ssh.remote_server_ip` or `ssh.bastion_host`: jump host / remote server IP for double SSH (omit when `ssh.mode=direct`).
 - `ssh.port`: SSH port for the outer/default connection.
 - `ssh.container_port`: inner hop port when `mode=double` (falls back to `ssh.port` if omitted).
 - `ssh.target_user`: user for the container host.

@@ -13,9 +13,9 @@ acs:
 
 ssh:
   mode: "jump"                                 # ssh 模式：direct(直连) | jump(-J) | double(两段 ssh)
-  remote_server_ip: "203.0.113.10"             # 跳板机/远程服务器 IP
-  bastion_host: "bastion.example.com"          # -J 使用的跳板主机（可与 remote_server_ip 相同）
-  bastion_user: "bastion"                      # 跳板登录用户
+  remote_server_ip: "203.0.113.10"             # 跳板机/远程服务器 IP（direct 模式可留空）
+  bastion_host: "bastion.example.com"          # -J 使用的跳板主机（direct 模式可留空）
+  bastion_user: "bastion"                      # 跳板登录用户（direct 模式可留空）
   target_user: "root"                          # 容器主机登录用户
   port: 22                                      # 外层/默认 ssh 端口
   container_port: 22                            # 内层 ssh 端口（double 模式），未设则使用 port
