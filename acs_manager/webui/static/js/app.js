@@ -1,5 +1,5 @@
 (() => {
-  const page = document.querySelector("[data-page]")?.getAttribute("data-page");
+  const page = document.body.getAttribute("data-page");
 
   async function fetchJSON(url, options) {
     const res = await fetch(url, options);
