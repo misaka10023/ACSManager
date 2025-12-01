@@ -34,34 +34,14 @@ def setup_logging(log_level: str) -> Path:
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{dt.date.today()}.log"
 
-    fmt_plain = "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
-
-    class LevelColorFormatter(logging.Formatter):
-        colors = {
-            logging.DEBUG: "\033[36m",  # cyan
-            logging.INFO: "\033[37m",  # white/light gray
-            logging.WARNING: "\033[33m",  # yellow
-            logging.ERROR: "\033[31m",  # red
-            logging.CRITICAL: "\033[41m",  # red background
-        }
-        reset = "\033[0m"
-
-        def format(self, record: logging.LogRecord) -> str:
-            color = self.colors.get(record.levelno, "")
-            message = super().format(record)
-            if not color:
-                return message
-            return f"{color}{message}{self.reset}"
-
-    file_handler = logging.FileHandler(log_path, encoding="utf-8")
-    file_handler.setFormatter(logging.Formatter(fmt_plain))
-
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(LevelColorFormatter(fmt_plain))
-
+    handlers = [
+        logging.FileHandler(log_path, encoding="utf-8"),
+        logging.StreamHandler(),
+    ]
     logging.basicConfig(
         level=getattr(logging, log_level.upper(), logging.INFO),
-        handlers=[file_handler, stream_handler],
+        format="[%(asctime)s] %(levelname)s %(name)s: %(message)s",
+        handlers=handlers,
     )
     return log_path
 
