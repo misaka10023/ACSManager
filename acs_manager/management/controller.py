@@ -224,23 +224,21 @@ class ContainerManager:
             if port_value:
                 base.extend(["-p", str(port_value)])
 
+        keepalive = ["-o", "ServerAliveInterval=60", "-o", "ServerAliveCountMax=3", "-o", "ExitOnForwardFailure=yes"]
+
         if mode == "double":
             if not bastion_host:
                 raise ValueError("double 模式需要 ssh.bastion_host 或 ssh.remote_server_ip。")
-            outer: List[str] = ["ssh", "-T"]
-            add_port(outer, ssh_port)
-            add_identity(outer)
-            outer.append(f"{bastion_user}@{bastion_host}")
-            # 内层负责保持连接并在容器侧打开远程转发
-            inner: List[str] = ["ssh", "-T", "-o", "ExitOnForwardFailure=yes", "-N"]
-            add_port(inner, ssh_cfg.get("container_port") or ssh_port)
-            add_identity(inner)
-            add_forwards(inner, remote_host="localhost", default_remote=True)
-            inner.append(f"{target_user}@{target_ip}")
-            outer.append(" ".join(inner))
-            cmd = outer
+            cmd: List[str] = ["ssh", "-T", "-N"] + keepalive
+            add_port(cmd, ssh_cfg.get("container_port") or ssh_port)
+            add_identity(cmd)
+            # 通过 ProxyCommand 走跳板机
+            proxy_cmd = f"ssh -W %h:%p {bastion_user}@{bastion_host}"
+            cmd.extend(["-o", f"ProxyCommand={proxy_cmd}"])
+            add_forwards(cmd, remote_host="localhost", default_remote=True)
+            cmd.append(f"{target_user}@{target_ip}")
         else:
-            cmd: List[str] = ["ssh"]
+            cmd: List[str] = ["ssh", "-T", "-N"] + keepalive
             add_port(cmd, ssh_port)
             add_identity(cmd)
             if mode == "jump":
