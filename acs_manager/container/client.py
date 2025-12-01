@@ -174,18 +174,24 @@ class ContainerClient:
         - 先筛出名称匹配的任务（instanceServiceName/taskName/notebookName/name 中任一包含/等于目标）
         - 在这些候选中，按 startTime/createTime 解析后的时间从新到旧排序，返回最新一条
         """
-        target = name.strip().lower()
+        target_raw = name.strip()
+        target = target_raw.lower()
         data = self.list_tasks(start=start, limit=limit)
-        candidates: List[Dict[str, Any]] = []
+        exact: List[Dict[str, Any]] = []
+        fuzzy: List[Dict[str, Any]] = []
         for item in data.get("data", []):
             for key in ("instanceServiceName", "taskName", "notebookName", "name"):
                 cand = str(item.get(key, "")).strip()
                 cand_l = cand.lower()
                 if not cand:
                     continue
-                if cand_l == target or cand_l.startswith(target) or target in cand_l:
-                    candidates.append(item)
+                if cand_l == target:
+                    exact.append(item)
                     break
+                if cand_l.startswith(target) or target in cand_l:
+                    fuzzy.append(item)
+                    break
+        candidates: List[Dict[str, Any]] = exact or fuzzy
         if not candidates:
             return None
 
