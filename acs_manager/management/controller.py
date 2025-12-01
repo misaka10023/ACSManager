@@ -244,6 +244,10 @@ class ContainerManager:
     def build_tunnel_command(self) -> List[str]:
         """生成带端口转发的 ssh 隧道命令。"""
         base = self.build_ssh_command()
+        mode = (self._ssh_cfg(reload=False).get("mode") or "jump").lower()
+        # double 模式需要在跳板机执行内层 ssh 命令，不能在外层加 -N
+        if mode == "double":
+            return base
         return ["ssh", "-o", "ExitOnForwardFailure=yes", "-N"] + base[1:]
 
     def _forward_ports(self, ssh_cfg: Dict[str, Any]) -> List[int]:
