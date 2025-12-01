@@ -61,9 +61,9 @@ class ContainerManager:
         if not task:
             logger.error("Container %s not found; cannot restart.", name)
             return
-        task_id = task.get("id") or task.get("instanceServiceId")
+        task_id = task.get("instanceServiceId") or task.get("id")
         if not task_id:
-            logger.error("No task id for %s; cannot restart.", name)
+            logger.error("No instanceServiceId for %s; cannot restart.", name)
             return
 
         logger.warning("Attempting restart for container %s (task id: %s)", name, task_id)
