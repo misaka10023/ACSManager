@@ -1,17 +1,15 @@
 ﻿# ACS 管理器配置示例（所有字段均含中文说明）
 
 acs:
-  base_url: "https://acs.example.com"          # ACS 控制台地址（抓包逻辑将硬编码使用）
-  session_cookie: "GV_JSESSIONID=replace"      # 网页会话 GV_JSESSIONID，保持登录态
-  login_user: "your-acs-username"              # 登录用户名（如使用免密可留空密码）
+  base_url: "https://acs.example.com"          # ACS 控制台地址
+  login_user: "your-acs-username"              # 登录用户名
   login_password: "change-me"                  # 登录密码
   user_type: "os"                              # 登录用户类型（前端下拉：os/gridview 等）
   public_key: "MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBALaXEnbjI6fjy+t9W9AiO/KS0q+b/OZFS+7ykinLbiriUx9P8BcuuHnVbXNiZp5jW70eVGBtX4DhGUPzJa1YT/8CAwEAAQ=="  # 登录密码加密公钥（Base64），一般不用改
-  cookies:                                     # 预置的 JSESSIONID/GV_JSESSIONID（可选）
+  cookies:                                     # 预置的 JSESSIONID/GV_JSESSIONID（可选；为空则自动登录获取）
     JSESSIONID: ""
     GV_JSESSIONID: ""
   container_name: "acs-container"              # 容器名称（如 E2SRLF）
-  container_ip_hint: "10.0.0.5"                # 抓包前的容器 IP 提示（可选）
   shutdown_hours: 360                           # 容器自动关机的小时数
   terminal_selector: "#terminal"               # 网页终端的 DOM 选择器
 
@@ -26,8 +24,7 @@ ssh:
   password_login: false                         # true 使用密码登录；false 使用密钥
   password: "change-me"                        # 密码登录密码（生产环境请替换）
   identity_file: "~/.ssh/id_ed25519"           # 私钥路径（密钥登录）
-  container_ip: "10.0.0.5"                     # 捕获前的容器 IP 回退值
-  local_open_port: 7890                         # 本地监听端口（本地代理软件监听）
+  local_open_port: 7890                         # 本地端口（本地代理软件监听）
   container_open_port: 7890                     # 容器内监听端口（需容器开放）
   forwards:                                     # 额外转发列表，remote 为容器端口
     - local: 7890

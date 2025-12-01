@@ -58,13 +58,15 @@ class ContainerClient:
         public_key_b64 = cfg.get("public_key", "")
         preset_cookies = cfg.get("cookies", {}) or {}
 
-        if not username or not password or not public_key_b64 or not self.base_url:
-            raise ValueError("Missing ACS login config (username/password/public_key/base_url).")
-
         if preset_cookies:
+            # 直接复用配置中的 Cookie
             self._seed_cookies(preset_cookies)
+            return LoginResult(True, None, self.session.cookies.get_dict(), {"msg": "use preset cookies"})
 
-        # prime session cookies
+        if not username or not password or not public_key_b64 or not self.base_url:
+            raise ValueError("缺少 ACS 登录配置（用户名/密码/公钥/base_url）")
+
+        # 预热 session
         self.session.get(f"{self.base_url}/login.html")
 
         enc_pwd = self._encrypt_password(password, public_key_b64)

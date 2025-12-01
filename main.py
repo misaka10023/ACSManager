@@ -63,10 +63,7 @@ def ensure_config(config_path: str, template_path: str = TEMPLATE_CONFIG) -> tup
 async def run(config_path: str, log_level: str) -> None:
     cfg_path, created = ensure_config(config_path)
     if created:
-        logging.error(
-            "Config file created at %s. Please fill it out and rerun. Exiting.",
-            cfg_path,
-        )
+        logging.error("已生成配置文件 %s，请填写配置后重新运行。", cfg_path)
         return
     store = ConfigStore(cfg_path)
     manager = ContainerManager(store)

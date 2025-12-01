@@ -54,27 +54,27 @@ class ContainerManager:
         acs_cfg = self._acs_cfg(reload=True)
         name = acs_cfg.get("container_name")
         if not name:
-            logger.error("No container_name configured; cannot restart.")
+            logger.error("未配置 container_name，无法重启。")
             return
 
         task = self.container_client.find_instance_by_name(name)
         if not task:
-            logger.error("Container %s not found; cannot restart.", name)
+            logger.error("未找到容器 %s，无法重启。", name)
             return
         task_id = task.get("instanceServiceId") or task.get("id")
         if not task_id:
-            logger.error("No instanceServiceId for %s; cannot restart.", name)
+            logger.error("容器 %s 缺少 instanceServiceId，无法重启。", name)
             return
 
-        logger.warning("Attempting restart for container %s (task id: %s)", name, task_id)
+        logger.warning("尝试重启容器 %s (task id: %s)", name, task_id)
         resp = self.container_client.restart_task(task_id)
         if str(resp.get("code")) == "0":
-            logger.info("Restart requested successfully: %s", resp)
+            logger.info("重启请求成功: %s", resp)
             self.state["last_restart"] = dt.datetime.utcnow()
             # exit monitor loop after successful restart request
             self._stop_requested = True
         else:
-            logger.error("Restart request failed: %s", resp)
+            logger.error("重启请求失败: %s", resp)
 
     def _parse_start_time(self, value: Optional[str]) -> Optional[dt.datetime]:
         if not value:
@@ -140,13 +140,9 @@ class ContainerManager:
         ssh_cfg = self._ssh_cfg(reload=reload_config)
         acs_cfg = self._acs_cfg(reload=reload_config)
 
-        target_ip = (
-            self.state.get("container_ip")
-            or ssh_cfg.get("container_ip")
-            or acs_cfg.get("container_ip_hint")
-        )
+        target_ip = self.state.get("container_ip") or ssh_cfg.get("container_ip")
         if not target_ip:
-            raise ValueError("Container IP is unknown. Capture layer has not reported it.")
+            raise ValueError("容器 IP 未知，尚未捕获或配置。")
 
         mode = (ssh_cfg.get("mode") or "jump").lower()
         target_user = ssh_cfg.get("target_user", "root")
@@ -204,7 +200,7 @@ class ContainerManager:
             cmd.append(f"{target_user}@{target_ip}")
 
         if password_login and password:
-            logger.info("Password login requested; ensure automation handles password entry securely.")
+            logger.info("检测到密码登录标记，请确保自动化安全处理密码输入。")
         return cmd
 
     def build_tunnel_command(self) -> List[str]:
