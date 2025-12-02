@@ -1,1 +1,2 @@
-﻿"""Web UI for ACS Manager."""
+# -*- coding: utf-8 -*-
+"""Web UI for ACS Manager."""
