@@ -1,1 +1,2 @@
-﻿"""Container lifecycle orchestration."""
+# -*- coding: utf-8 -*-
+"""Container lifecycle orchestration."""
