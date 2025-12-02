@@ -81,12 +81,21 @@ async def run(config_path: str, log_level: str) -> None:
     )
 
     web_cfg = store.get_section("webui", default={}, reload=True)
+
+    # 先启动 WebUI 与抓包，让界面可用
+    sniffer_task = asyncio.create_task(sniffer.start())
+    web_task = asyncio.create_task(start_web_ui(web_cfg))
+
+    # 启动流程中：先登录并检查容器状态（Waiting/Running/Stopped）
+    if acs_cfg.get("container_name"):
+        await manager.prepare_on_start()
+
     tasks = [
-        asyncio.create_task(sniffer.start()),
-        asyncio.create_task(start_web_ui(web_cfg)),
+        sniffer_task,
+        web_task,
         asyncio.create_task(manager.maintain_tunnel()),
     ]
-    # monitor container status/near-shutdown restarts
+    # 监控容器生命周期（预估停止时间、自动重启等）
     if acs_cfg.get("container_name"):
         tasks.append(
             asyncio.create_task(
