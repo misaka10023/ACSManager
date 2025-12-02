@@ -11,3 +11,11 @@ config/settings.yaml
 /dataSources/
 /dataSources.local.xml
 
+
+# IntelliJ IDEA local files (merged from .idea/.gitignore)
+/shelf/
+/workspace.xml
+/httpRequests/
+/dataSources/
+/dataSources.local.xml
+
