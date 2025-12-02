@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class ContainerManager:
-    """?? ACS ???????IP ??? SSH ?????"""
+    """?? ACS ????????? IP ???? SSH ?????"""
 
     def __init__(
         self,
@@ -45,7 +45,7 @@ class ContainerManager:
             "container_start_time": None,
         }
 
-        # SSH ????????
+        # SSH ?????????
         self._tunnel_process: Optional[Process] = None
         self._proc_lock = asyncio.Lock()
         self._stop_requested = False
@@ -131,7 +131,7 @@ class ContainerManager:
         await self.restart_container()
 
     async def prepare_on_start(self, poll_interval: int = 10) -> None:
-        """???????????????????????? Waiting / Stopped??"""
+        """???????????????????????? Waiting / Stopped ???"""
         acs_cfg = self._acs_cfg(reload=True)
         name = acs_cfg.get("container_name")
         if not name:
@@ -356,7 +356,7 @@ class ContainerManager:
             await asyncio.sleep(interval)
 
     # ------------------------------------------------------------------
-    # SSH ?????????
+    # SSH ???????
     # ------------------------------------------------------------------
 
     def _forward_ports(self, ssh_cfg: Dict[str, Any]) -> List[int]:
@@ -446,6 +446,7 @@ class ContainerManager:
             plist=plist,
             use_sudo="true" if allow_sudo else "false",
         )
+
         try:
             res = subprocess.run(
                 cmd,
@@ -502,7 +503,7 @@ class ContainerManager:
             )
 
     def _reverse_specs(self, ssh_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """???????? reverse_forwards(local->remote[,intermediate])?"""
+        """???????? reverse_forwards(local->remote[, intermediate])?"""
         local_open_port = ssh_cfg.get("local_open_port")
         container_open_port = ssh_cfg.get("container_open_port")
         intermediate_port = ssh_cfg.get("intermediate_port")
