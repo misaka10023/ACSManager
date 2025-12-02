@@ -11,7 +11,7 @@ acs:
   cookies:                                 # 预置 JSESSIONID / GV_JSESSIONID（可选；为空则自动登录获取）
     JSESSIONID: ""
     GV_JSESSIONID: ""
-  container_name: "E2SRLF"                 # 登录后列表显示的容器/任务名称
+  container_name: "abc"                 # 登录后列表显示的容器/任务名称
 
 ssh:
   mode: "jump"                             # ssh 模式：direct(直连容器) | jump(-J 跳板) | double(双层 ssh)
