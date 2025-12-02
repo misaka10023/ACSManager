@@ -3,3 +3,11 @@ temp_workspace/
 config/local/
 config/settings.yaml
 .idea/
+
+# IntelliJ IDEA local files (merged from .idea/.gitignore)
+/shelf/
+/workspace.xml
+/httpRequests/
+/dataSources/
+/dataSources.local.xml
+
