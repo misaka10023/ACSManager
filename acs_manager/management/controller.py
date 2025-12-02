@@ -1,3 +1,4 @@
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import asyncio
@@ -34,6 +35,7 @@ class ContainerManager:
             "tunnel_last_exit": None,
             "container_status": None,
             "container_start_time": None,
+            "remaining_time_str": None,
         }
         self._tunnel_process: Optional[Process] = None
         self._proc_lock = asyncio.Lock()
@@ -42,58 +44,55 @@ class ContainerManager:
         self._tunnel_failure_count = 0
 
     async def handle_new_ip(self, ip: str) -> None:
-        """捕获到新 IP 时更新状态；IP 真变化且已建立过隧道才重启。"""
+        """捕获到新的容器 IP 时更新状态，若隧道已启动则重启隧道。"""
         old_ip = self.state.get("container_ip")
         self.state["last_seen"] = dt.datetime.now()
 
-        # IP 未变且隧道已跑过：仅当心跳，避免重复重启
         if old_ip == ip and self._tunnel_started_once:
-            logger.debug("容器 IP 未变化(%s)，仅更新 last_seen。", ip)
+            logger.debug("Container IP unchanged (%s); heartbeat only.", ip)
             return
 
         self.state["container_ip"] = ip
 
-        # 首次拿到 IP：让 maintain_tunnel 执行第一次启动，不抢它的流程
         if not self._tunnel_started_once:
-            logger.info("容器 IP 首次捕获为 %s，等待隧道初始化。", ip)
+            logger.info("Captured container IP for the first time: %s; waiting for tunnel init.", ip)
             return
 
-        # IP 真变化：重启隧道
-        logger.info("容器 IP 更新为 %s（旧值: %s），重启隧道。", ip, old_ip)
+        logger.info("Container IP updated to %s (old %s); restarting tunnel.", ip, old_ip)
         await self.restart_tunnel()
 
     def update_container_status(self, status: Optional[str], start_time: Optional[str]) -> None:
+        """更新容器状态与启动时间。"""
         self.state["container_status"] = status
         self.state["container_start_time"] = start_time
 
     def resolve_container_ip(self, *, force_login: bool = True) -> Optional[str]:
-        """在 IP 不明时通过 API 自动获取。"""
+        """在 IP 未知时通过 API 自动获取。"""
         name = self._acs_cfg(reload=True).get("container_name")
         if not name:
-            logger.warning("未配置 acs.container_name，无法自动获取 IP。")
+            logger.warning("acs.container_name not configured; cannot auto-resolve IP.")
             return None
         if force_login:
             try:
                 self.container_client.login()
-            except Exception as exc:  # pragma: no cover - 网络异常
-                logger.error("自动登录以获取容器 IP 失败: %s", exc)
+            except Exception as exc:  # pragma: no cover - network errors
+                logger.error("Login failed while resolving container IP: %s", exc)
                 return None
         try:
             info = self.container_client.get_container_instance_info_by_name(name)
-        except Exception as exc:  # pragma: no cover - 网络异常
-            logger.error("通过 API 获取容器 %s 信息失败: %s", name, exc)
+        except Exception as exc:  # pragma: no cover - network errors
+            logger.error("Failed to query container %s via API: %s", name, exc)
             return None
         if info and info.get("instanceIp"):
             ip = info["instanceIp"]
             self.state["container_ip"] = ip
             self.state["last_seen"] = dt.datetime.now()
-            logger.info("通过 API 自动获取容器 IP: %s", ip)
+            logger.info("Resolved container IP via API: %s", ip)
             return ip
-        logger.warning("无法通过 API 获取容器 %s 的 IP。", name)
+        logger.warning("Could not resolve container %s IP from API.", name)
         return None
-
     async def ensure_running(self) -> None:
-        """捕获到关闭时调用，立即尝试重启。"""
+        """检测到容器停止时触发重启。"""
         await self.restart_container()
 
     async def restart_container(self) -> None:
@@ -101,36 +100,36 @@ class ContainerManager:
         acs_cfg = self._acs_cfg(reload=True)
         name = acs_cfg.get("container_name")
         if not name:
-            logger.error("未配置 acs.container_name，无法重启。")
+            logger.error("acs.container_name not configured; cannot restart.")
             return
 
         try:
             task = self.container_client.find_instance_by_name(name)
         except Exception as exc:
-            logger.error("查询容器 %s 失败，无法重启: %s", name, exc)
+            logger.error("Failed to query container %s; cannot restart: %s", name, exc)
             return
         if not task:
-            logger.error("未找到容器 %s，无法重启。", name)
+            logger.error("Container %s not found; cannot restart.", name)
             return
         task_id = task.get("instanceServiceId") or task.get("id")
         if not task_id:
-            logger.error("容器 %s 缺少 instanceServiceId，无法重启。", name)
+            logger.error("Container %s missing instanceServiceId; cannot restart.", name)
             return
 
-        logger.warning("尝试重启容器 %s (task id: %s)", name, task_id)
+        logger.warning("Attempting to restart container %s (task id: %s)", name, task_id)
         try:
             resp = self.container_client.restart_task(task_id)
         except Exception as exc:
-            logger.error("调用重启接口失败: %s", exc)
+            logger.error("Restart API call failed: %s", exc)
             return
         if str(resp.get("code")) == "0":
-            logger.info("重启请求成功: %s", resp)
+            logger.info("Restart request accepted: %s", resp)
             self.state["last_restart"] = dt.datetime.now()
-            self._stop_requested = True
         else:
-            logger.error("重启请求失败: %s", resp)
+            logger.error("Restart request failed: %s", resp)
 
     def _parse_start_time(self, value: Optional[str]) -> Optional[dt.datetime]:
+        """解析时间字符串为 datetime。"""
         if not value:
             return None
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
@@ -141,9 +140,7 @@ class ContainerManager:
         return None
 
     def _parse_remaining_time_str(self, value: Optional[str]) -> Optional[int]:
-        """
-        解析 ACS 提供的 remainingTime 文本，例如 \"14d 23h 48m\"，返回秒数。
-        """
+        """解析 ACS remainingTime 文本，如 "14d 23h 48m"，返回秒数。"""
         if not value:
             return None
         text = str(value).strip()
@@ -164,13 +161,11 @@ class ContainerManager:
         return total or None
 
     async def monitor_container(self, *, pre_shutdown_minutes: int = 10, slow_interval: int = 300, fast_interval: int = 30) -> None:
-        """
-        周期检查容器状态；接近超时时缩短检查间隔，停止时立即重启。
-        """
+        """周期检查容器状态，接近超时时加快轮询，停止则重启。"""
         acs_cfg = self._acs_cfg(reload=True)
         name = acs_cfg.get("container_name")
         if not name:
-            logger.warning("未配置 acs.container_name，监控退出。")
+            logger.warning("acs.container_name not configured; monitor loop exits.")
             return
 
         while not self._stop_requested:
@@ -179,7 +174,7 @@ class ContainerManager:
                 try:
                     info = self.container_client.get_container_instance_info_by_name(name)
                 except Exception as exc:
-                    # 如果是认证失败，尝试重新登录一次
+                    # 认证失败尝试重新登录一次
                     try:
                         if hasattr(exc, "response") and getattr(exc.response, "status_code", None) == 401:  # type: ignore[attr-defined]
                             self.container_client.login()
@@ -196,13 +191,12 @@ class ContainerManager:
                     if ip:
                         await self.handle_new_ip(ip)
 
-                    # 使用 startTime + timeoutLimit 计算预计自动停止时间和剩余时间
+                    # 使用 startTime + timeoutLimit 计算预计停止时间与剩余秒数
                     start_dt = self._parse_start_time(start_time_str)
                     timeout_str = info.get("timeoutLimit")
                     now = dt.datetime.now()
                     if start_dt and timeout_str:
                         try:
-                            # 记录当前使用的超时时间配置，方便 WebUI 展示
                             self.state["timeout_limit"] = timeout_str
                             hours, minutes, seconds = timeout_str.split(":")
                             delta = dt.timedelta(hours=int(hours), minutes=int(minutes), seconds=int(seconds))
@@ -211,22 +205,20 @@ class ContainerManager:
                             remaining = (next_shutdown - now).total_seconds()
                             remaining_sec = int(remaining) if remaining > 0 else 0
                             self.state["remaining_seconds"] = remaining_sec
-                            # 生成人类可读的剩余时间字符串
                             if remaining_sec > 0:
                                 days = remaining_sec // 86400
                                 hours_left = (remaining_sec % 86400) // 3600
                                 mins_left = (remaining_sec % 3600) // 60
                                 parts = []
                                 if days > 0:
-                                    parts.append(f"{days} 天")
+                                    parts.append(f"{days}d")
                                 if hours_left > 0:
-                                    parts.append(f"{hours_left} 小时")
+                                    parts.append(f"{hours_left}h")
                                 if mins_left > 0 or not parts:
-                                    parts.append(f"{mins_left} 分钟")
+                                    parts.append(f"{mins_left}m")
                                 self.state["remaining_time_str"] = " ".join(parts)
                             else:
-                                self.state["remaining_time_str"] = "0 分钟"
-                            # 接近停止时间，使用快速轮询
+                                self.state["remaining_time_str"] = "0m"
                             threshold = next_shutdown - dt.timedelta(minutes=pre_shutdown_minutes)
                             interval = fast_interval if now >= threshold else slow_interval
                         except Exception:
@@ -245,31 +237,24 @@ class ContainerManager:
                     stop_statuses = {"terminated", "stopped", "stop", "failed"}
                     waiting_statuses = {"waiting"}
 
-                    # Waiting 视为排队状态，不触发重启，但可以考虑加快轮询
                     if status_norm in waiting_statuses:
-                        logger.info("容器 %s 当前状态为 Waiting（排队），等待调度。", name)
+                        logger.info("Container %s is Waiting (queued); continuing to poll.", name)
                         interval = min(interval, fast_interval)
 
                     if status_norm in stop_statuses:
-                        logger.warning("容器 %s 状态为 %s，触发重启。", name, status)
+                        logger.warning("Container %s status is %s; triggering restart.", name, status)
                         await self.restart_container()
                         break
                 else:
-                    logger.warning("容器 %s 未找到，将快速重试。", name)
+                    logger.warning("Container %s not found; will retry soon.", name)
                     interval = fast_interval
-            except Exception as exc:  # pragma: no cover - 网络/API 异常
-                logger.error("监控循环异常: %s", exc)
+            except Exception as exc:  # pragma: no cover - network/API errors
+                logger.error("Monitor loop error: %s", exc)
                 interval = fast_interval
 
             await asyncio.sleep(interval)
-
     def build_ssh_command(self, *, reload_config: bool = True) -> List[str]:
-        """
-        组装 ssh 命令：
-        - direct：直连容器
-        - jump：使用 -J 跳板
-        - double：双层 ssh（外层到跳板，内层到容器）
-        """
+        """组装 SSH 命令：direct/jump/double。"""
         ssh_cfg = self._ssh_cfg(reload=reload_config)
         acs_cfg = self._acs_cfg(reload=reload_config)
 
@@ -277,7 +262,7 @@ class ContainerManager:
         if not target_ip:
             target_ip = self.resolve_container_ip()
         if not target_ip:
-            raise ValueError("容器 IP 未知，尚未捕获或配置。")
+            raise ValueError("Container IP unknown; not captured or configured.")
 
         mode = (ssh_cfg.get("mode") or "jump").lower()
         target_user = ssh_cfg.get("target_user", "root")
@@ -296,10 +281,7 @@ class ContainerManager:
             *,
             default_remote: bool = False,
         ) -> None:
-            """
-            默认转发（无自定义 forwards）使用远程转发 -R，令容器端口可见；
-            显式 forwards 列表仍按 -L 行为（本地 -> 远端）。
-            """
+            """无自定义时默认使用 -R 将本地端口暴露到容器；自定义 forwards 仍按 -L。"""
             if forwards:
                 for spec in forwards:
                     local = spec.get("local")
@@ -332,23 +314,19 @@ class ContainerManager:
 
         if mode == "double":
             if not bastion_host:
-                raise ValueError("double 模式需要 ssh.bastion_host 或 ssh.remote_server_ip。")
+                raise ValueError("double mode requires ssh.bastion_host or ssh.remote_server_ip")
             revs = self._reverse_specs(ssh_cfg)
             if any(spec.get("mid") is None for spec in revs):
-                raise ValueError("double 模式的反向转发需要 intermediate_port 或每条 reverse_forwards.intermediate。")
+                raise ValueError("double mode reverse forwarding needs intermediate_port or reverse_forwards.intermediate")
 
             outer: List[str] = ["ssh", "-T"] + keepalive
             add_port(outer, ssh_port)
-            # 本地正向转发（如有）在外层执行
             add_forwards(outer, default_remote=False)
-            # 外层负责将本地端口暴露到跳板的中间端口
             for spec in revs:
                 outer.extend(["-R", f"{spec['mid']}:localhost:{spec['local']}"])
             outer.append(f"{bastion_user}@{bastion_host}")
-            # 内层保持连接并在容器侧打开反向转发
             inner: List[str] = ["ssh", "-T", "-N"] + keepalive
             add_port(inner, ssh_cfg.get("container_port") or ssh_port)
-            # 内层将容器端口指向跳板中间端口
             for spec in revs:
                 inner.extend(["-R", f"{spec['remote']}:localhost:{spec['mid']}"])
             inner.append(f"{target_user}@{target_ip}")
@@ -359,29 +337,25 @@ class ContainerManager:
             add_port(cmd, ssh_port)
             if mode == "jump":
                 if not bastion_host:
-                    raise ValueError("jump 模式需要 ssh.bastion_host 或 ssh.remote_server_ip。")
+                    raise ValueError("jump mode requires ssh.bastion_host or ssh.remote_server_ip")
                 cmd.extend(["-J", f"{bastion_user}@{bastion_host}"])
             add_forwards(cmd, default_remote=False)
             cmd.append(f"{target_user}@{target_ip}")
 
         if password_login and password:
-            logger.info("检测到密码登录标记，请确保自动化安全处理密码输入。")
+            logger.info("Password login enabled; ensure automation handles password input safely.")
         return cmd
 
     def build_tunnel_command(self) -> List[str]:
-        """生成带端口转发的 ssh 隧道命令。"""
+        """生成带端口转发的 SSH 隧道命令。"""
         base = self.build_ssh_command()
         mode = (self._ssh_cfg(reload=False).get("mode") or "jump").lower()
-        # double 模式需要在跳板机执行内层 ssh 命令，不能在外层加 -N
         if mode == "double":
             return base
         return ["ssh", "-o", "ExitOnForwardFailure=yes", "-N"] + base[1:]
 
     def _forward_ports(self, ssh_cfg: Dict[str, Any]) -> List[int]:
-        """
-        收集需要本地监听的端口（仅针对 -L 正向转发）。
-        反向转发 -R 不在本地绑定端口，不需要检测占用。
-        """
+        """收集需要本地监听的端口（仅 -L 正向转发）。"""
         ports: List[int] = []
         forwards = ssh_cfg.get("forwards") or []
         for spec in forwards:
@@ -399,7 +373,7 @@ class ContainerManager:
                 try:
                     s.bind(("127.0.0.1", p))
                 except OSError:
-                    logger.error("本地端口 %s 已被占用，尝试自动清理后重试。", p)
+                    logger.error("Local port %s is in use; attempting cleanup then retry.", p)
                     return False
         return True
 
@@ -420,7 +394,7 @@ class ContainerManager:
         for pid in targets:
             try:
                 proc = psutil.Process(pid)
-                logger.warning("强制结束占用端口的 ssh 进程 pid=%s", pid)
+                logger.warning("Killing local ssh occupying port, pid=%s", pid)
                 proc.terminate()
                 try:
                     proc.wait(timeout=2)
@@ -439,7 +413,7 @@ class ContainerManager:
         jump: Optional[str] = None,
         allow_sudo: bool = True,
     ) -> None:
-        """在远端主机上强杀占用指定端口的进程（优先使用 netstat，必要时 sudo）。"""
+        """在远端主机上强杀占用指定端口的进程，优先 netstat。"""
         if not host or not user or not ports:
             return
         cmd = ["ssh", "-T"]
@@ -459,7 +433,7 @@ for p in {plist}; do
     $PREF ss -ltnp | awk -F'pid=' '$0 ~ /:$p/ {{print $2}}' | awk '{{print $1}}' | tr -d ',' | xargs -r $PREF kill -9
   fi
   if command -v fuser >/dev/null 2>&1; then
-    $PREF fuser -k ${{p}}/tcp
+    $PREF fuser -k ${p}/tcp
   fi
 done
 """.format(plist=plist, use_sudo="true" if allow_sudo else "false")
@@ -475,13 +449,13 @@ done
             out = res.stdout.decode(errors="ignore").strip()
             err = res.stderr.decode(errors="ignore").strip()
             if res.returncode != 0:
-                logger.debug("远端端口清理返回码 %s", res.returncode)
+                logger.debug("Remote port cleanup returned code %s", res.returncode)
                 if err:
-                    logger.debug("远端端口清理 stderr: %s", err)
+                    logger.debug("Remote port cleanup stderr: %s", err)
             elif out:
-                logger.debug("远端端口清理输出: %s", out)
+                logger.debug("Remote port cleanup output: %s", out)
         except Exception as exc:
-            logger.info("远端端口清理失败: %s", exc)
+            logger.info("Remote port cleanup failed: %s", exc)
             return
 
     def _remote_cleanup_ports(self, ports: List[int]) -> None:
@@ -543,11 +517,7 @@ done
             )
 
     def _reverse_specs(self, ssh_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        构造反向转发规格：
-        - reverse_forwards 列表项：local(本地)->remote(容器)，可选 intermediate(跳板)
-        - 若 reverse_forwards 为空，则默认使用 container_open_port/local_open_port
-        """
+        """构造反向转发规范，缺省使用 container_open_port/local_open_port。"""
         local_open_port = ssh_cfg.get("local_open_port")
         container_open_port = ssh_cfg.get("container_open_port")
         intermediate_port = ssh_cfg.get("intermediate_port")
@@ -561,9 +531,8 @@ done
             mid = spec.get("intermediate") or intermediate_port
             specs.append({"local": int(local), "remote": int(remote), "mid": int(mid) if mid else None})
         return specs
-
     async def _ensure_ports_free(self, ports: List[int], retries: int = 3, delay: float = 1.0) -> bool:
-        """在隧道重连时，重试释放端口后再启动。"""
+        """隧道重连前多次尝试释放端口。"""
         for attempt in range(retries):
             if self._ports_available(ports):
                 return True
@@ -586,38 +555,39 @@ done
                     try:
                         self.container_client.login()
                     except Exception as exc:
-                        logger.error("获取容器 IP 前登录失败: %s", exc)
-                    target_ip = self.state.get("container_ip") or self.resolve_container_ip(force_login=False) or self.resolve_container_ip(force_login=True)
+                        logger.error("Login failed before resolving container IP: %s", exc)
+                    target_ip = (
+                        self.state.get("container_ip")
+                        or self.resolve_container_ip(force_login=False)
+                        or self.resolve_container_ip(force_login=True)
+                    )
                     if not target_ip:
-                        raise ValueError("容器 IP 未知，无法启动隧道。")
+                        raise ValueError("Container IP unknown; cannot start tunnel.")
                 reverse_specs = self._reverse_specs(ssh_cfg)
                 ports = self._forward_ports(ssh_cfg)
-                # 远程反向转发端口预清理（容器端 & 跳板中间端口）
                 remote_ports = [spec["remote"] for spec in reverse_specs if spec.get("remote")]
                 intermediate_ports = [spec["mid"] for spec in reverse_specs if spec.get("mid")]
                 if reverse_specs:
-                    logger.info("尝试清理远端端口: container=%s, intermediate=%s", remote_ports, intermediate_ports)
+                    logger.info("Cleaning remote ports before starting: container=%s, intermediate=%s", remote_ports, intermediate_ports)
                     self._reverse_cleanup_ports(remote_ports, intermediate_ports, ssh_cfg, target_ip)
-                    # 短暂停顿让远端清理完成
                     await asyncio.sleep(1.0)
-                # 每次启动前都确保端口可用，并尝试清理同用户的 ssh 占用
                 if ports and not await self._ensure_ports_free(ports):
                     self.state["tunnel_status"] = "error"
                     return
                 cmd = self.build_tunnel_command()
             except Exception as exc:
-                logger.error("无法构建隧道命令: %s", exc)
+                logger.error("Cannot build tunnel command: %s", exc)
                 self.state["tunnel_status"] = "error"
                 return
 
-            logger.info("启动 SSH 隧道: %s", " ".join(cmd))
+            logger.info("Starting SSH tunnel: %s", " ".join(cmd))
             proc = await asyncio.create_subprocess_exec(*cmd)
             self._tunnel_process = proc
             self.state["tunnel_status"] = "running"
             self._tunnel_started_once = True
 
     async def stop_tunnel(self) -> None:
-        """停止隧道并清理状态。"""
+        """停止隧道并更新状态。"""
         async with self._proc_lock:
             proc = self._tunnel_process
             if not proc:
@@ -633,7 +603,7 @@ done
             self._tunnel_process = None
 
     async def restart_tunnel(self) -> None:
-        """重启隧道以刷新转发并清理端口。"""
+        """重启隧道刷新转发与端口。"""
         await self.stop_tunnel()
         await self.start_tunnel()
 
@@ -649,18 +619,24 @@ done
                 rc = await proc.wait()
                 if rc == 0:
                     self._tunnel_failure_count = 0
-                    logger.info("SSH 隧道正常退出。")
+                    logger.info("SSH tunnel exited normally.")
                 else:
                     self._tunnel_failure_count += 1
-                    logger.warning("SSH 隧道退出码 %s；稍后重启。（连续失败次数：%s）", rc, self._tunnel_failure_count)
-                    # 多次失败后尝试重新刷新容器 IP，再重试隧道
+                    logger.warning(
+                        "SSH tunnel exit code %s; will restart soon. (consecutive failures: %s)",
+                        rc,
+                        self._tunnel_failure_count,
+                    )
                     if self._tunnel_failure_count >= 3:
                         name = self._acs_cfg(reload=True).get("container_name")
-                        logger.warning("SSH 隧道连续失败 >=3 次，尝试通过 API 刷新容器 IP（容器：%s）。", name)
+                        logger.warning(
+                            "SSH tunnel failed >=3 times; refreshing container IP via API (container: %s).",
+                            name,
+                        )
                         self.resolve_container_ip(force_login=True)
                         self._tunnel_failure_count = 0
-            except Exception as exc:  # pragma: no cover - 子进程异常
-                logger.error("SSH 隧道崩溃: %s", exc)
+            except Exception as exc:  # pragma: no cover - subprocess errors
+                logger.error("SSH tunnel crashed: %s", exc)
             finally:
                 await self.stop_tunnel()
             await asyncio.sleep(3)
@@ -673,6 +649,72 @@ done
     def snapshot(self) -> Dict[str, Any]:
         """获取当前状态（供 Web UI 展示）。"""
         return dict(self.state)
+
+    async def prepare_on_start(self, wait_interval: int = 5, start_timeout: int = 300) -> None:
+        """启动阶段：登录后检查容器状态，Waiting 等待，Stopped 重启，Running 继续。"""
+        acs_cfg = self._acs_cfg(reload=True)
+        name = acs_cfg.get("container_name")
+        if not name:
+            logger.warning("acs.container_name not configured; skip startup check.")
+            return
+
+        try:
+            self.container_client.login()
+            logger.info("Logged in to ACS for startup check.")
+        except Exception as exc:
+            logger.error("Login failed during startup preparation: %s", exc)
+            return
+
+        def _fetch_info() -> Optional[Dict[str, Any]]:
+            try:
+                return self.container_client.get_container_instance_info_by_name(name)
+            except Exception as exc:
+                logger.error("Failed to fetch container info for %s: %s", name, exc)
+                return None
+
+        info = _fetch_info()
+        if not info:
+            logger.warning("Container %s not found during startup check.", name)
+            return
+
+        status = (info.get("status") or "").lower()
+        start_time = info.get("startTime") or info.get("createTime")
+        self.update_container_status(info.get("status"), start_time)
+        ip = info.get("instanceIp")
+        if ip:
+            await self.handle_new_ip(ip)
+
+        async def _wait_for_running() -> None:
+            deadline = dt.datetime.now() + dt.timedelta(seconds=start_timeout)
+            while dt.datetime.now() < deadline and not self._stop_requested:
+                latest = _fetch_info()
+                if not latest:
+                    await asyncio.sleep(wait_interval)
+                    continue
+                status_local = (latest.get("status") or "").lower()
+                self.update_container_status(latest.get("status"), latest.get("startTime") or latest.get("createTime"))
+                ip_local = latest.get("instanceIp")
+                if ip_local:
+                    await self.handle_new_ip(ip_local)
+                if status_local == "running":
+                    logger.info("Container %s is now running; continue startup.", name)
+                    return
+                if status_local == "waiting":
+                    logger.info("Container %s still waiting; polling...", name)
+                else:
+                    logger.info("Container %s status=%s; waiting for running...", name, status_local)
+                await asyncio.sleep(wait_interval)
+            logger.warning("Timeout waiting for container %s to reach running state.", name)
+
+        if status == "waiting":
+            logger.info("Container %s is Waiting; polling until it starts.", name)
+            await _wait_for_running()
+        elif status in {"terminated", "stopped", "stop", "failed"}:
+            logger.warning("Container %s is stopped (%s); attempting to start.", name, status)
+            await self.restart_container()
+            await _wait_for_running()
+        else:
+            logger.info("Container %s status is %s; continuing startup.", name, status or "unknown")
 
     def _acs_cfg(self, *, reload: bool = False) -> Dict[str, Any]:
         return self.store.get_section("acs", default={}, reload=reload)
