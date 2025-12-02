@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import asyncio
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class ContainerManager:
-    """?? ACS ????????? IP ???? SSH ?????"""
+    """Handle ACS container lifecycle, IP tracking, and SSH tunnel orchestration."""
 
     def __init__(
         self,
@@ -30,7 +30,7 @@ class ContainerManager:
         self.store = store
         self.container_client = container_client or ContainerClient(store)
 
-        # ? WebUI ?????????
+        # State snapshot exposed to WebUI
         self.state: Dict[str, Any] = {
             "container_ip": None,
             "next_shutdown": None,
@@ -45,7 +45,7 @@ class ContainerManager:
             "container_start_time": None,
         }
 
-        # SSH ?????????
+        # SSH tunnel process and control flags
         self._tunnel_process: Optional[Process] = None
         self._proc_lock = asyncio.Lock()
         self._stop_requested = False
@@ -53,7 +53,7 @@ class ContainerManager:
         self._tunnel_failure_count = 0
 
     # ------------------------------------------------------------------
-    # ????
+    # Config access helpers
     # ------------------------------------------------------------------
 
     def _acs_cfg(self, *, reload: bool = False) -> Dict[str, Any]:
@@ -63,28 +63,26 @@ class ContainerManager:
         return self.store.get_section("ssh", default={}, reload=reload)
 
     # ------------------------------------------------------------------
-    # ?? IP / ????
+    # Container IP / status management
     # ------------------------------------------------------------------
 
     async def handle_new_ip(self, ip: str) -> None:
-        """???????? IP ???????? IP ??????????????????"""
+        """Update state when a new container IP is captured; restart tunnel only on real IP change."""
         old_ip = self.state.get("container_ip")
         self.state["last_seen"] = dt.datetime.now()
 
-        # IP ??????????????????????
         if old_ip == ip and self._tunnel_started_once:
-            logger.debug("?? IP ???(%s)???? last_seen?", ip)
+            logger.debug("Container IP unchanged (%s); only updating last_seen.", ip)
             return
 
         self.state["container_ip"] = ip
 
-        # ???? IP??? maintain_tunnel ?????????????
+        # First IP: let maintain_tunnel perform the initial start
         if not self._tunnel_started_once:
-            logger.info("?? IP ????? %s?????????", ip)
+            logger.info("Container IP first captured as %s; waiting for tunnel init.", ip)
             return
 
-        # IP ?????????
-        logger.info("?? IP ??? %s???: %s???????", ip, old_ip)
+        logger.info("Container IP updated to %s (old: %s); restarting tunnel.", ip, old_ip)
         await self.restart_tunnel()
 
     def update_container_status(
@@ -92,57 +90,57 @@ class ContainerManager:
         status: Optional[str],
         start_time: Optional[str],
     ) -> None:
-        """???????????????"""
+        """Update container status and start time fields."""
         self.state["container_status"] = status
         self.state["container_start_time"] = start_time
 
     def resolve_container_ip(self, *, force_login: bool = True) -> Optional[str]:
-        """? IP ?????? ACS API ?????"""
+        """Resolve container IP via ACS API when unknown."""
         name = self._acs_cfg(reload=True).get("container_name")
         if not name:
-            logger.warning("??? acs.container_name??????? IP?")
+            logger.warning("acs.container_name is not configured; cannot auto-resolve IP.")
             return None
 
         if force_login:
             try:
                 self.container_client.login()
-            except Exception as exc:  # pragma: no cover - ????
-                logger.error("????????? IP ??: %s", exc)
+            except Exception as exc:  # pragma: no cover - network/auth errors
+                logger.error("Auto-login to fetch container IP failed: %s", exc)
                 return None
 
         try:
             info = self.container_client.get_container_instance_info_by_name(name)
-        except Exception as exc:  # pragma: no cover - ????
-            logger.error("?? API ???? %s ????: %s", name, exc)
+        except Exception as exc:  # pragma: no cover - network/auth errors
+            logger.error("Failed to fetch container %s info via API: %s", name, exc)
             return None
 
         if info and info.get("instanceIp"):
             ip = info["instanceIp"]
             self.state["container_ip"] = ip
             self.state["last_seen"] = dt.datetime.now()
-            logger.info("?? API ?????? IP: %s", ip)
+            logger.info("Auto-resolved container IP via API: %s", ip)
             return ip
 
-        logger.warning("???? API ???? %s ? IP?", name)
+        logger.warning("Could not resolve container %s IP via API.", name)
         return None
 
     async def ensure_running(self) -> None:
-        """??????????????????"""
+        """Called when container is detected stopped; attempt immediate restart."""
         await self.restart_container()
 
     async def prepare_on_start(self, poll_interval: int = 10) -> None:
-        """???????????????????????? Waiting / Stopped ???"""
+        """Startup pre-check: login and ensure container is runnable (handle Waiting / Stopped states)."""
         acs_cfg = self._acs_cfg(reload=True)
         name = acs_cfg.get("container_name")
         if not name:
-            logger.info("??? acs.container_name?????????")
+            logger.info("acs.container_name not configured; skip startup pre-check.")
             return
 
-        # ?????? cookie
+        # Refresh login cookie once
         try:
             self.container_client.login()
-        except Exception as exc:  # pragma: no cover - ????
-            logger.error("????? ACS ??: %s", exc)
+        except Exception as exc:  # pragma: no cover - login errors
+            logger.error("Pre-start login to ACS failed: %s", exc)
             return
 
         stop_statuses = {"terminated", "stopped", "stop", "failed"}
@@ -151,13 +149,13 @@ class ContainerManager:
         while not self._stop_requested:
             try:
                 info = self.container_client.get_container_instance_info_by_name(name)
-            except Exception as exc:  # pragma: no cover - ??/API ??
-                logger.error("???? %s ????: %s", name, exc)
+            except Exception as exc:  # pragma: no cover - login/API errors
+                logger.error("Failed to fetch container %s status: %s", name, exc)
                 await asyncio.sleep(poll_interval)
                 continue
 
             if not info:
-                logger.warning("?? API ????? %s ????????", name)
+                logger.warning("No container info for %s; retry soon.", name)
                 await asyncio.sleep(poll_interval)
                 continue
 
@@ -170,61 +168,61 @@ class ContainerManager:
 
             status_norm = (status or "").lower()
             if status_norm in waiting_statuses:
-                logger.info("????? %s ?? Waiting??????????", name)
+                logger.info("Container %s is Waiting (queued); waiting for scheduling.", name)
                 await asyncio.sleep(poll_interval)
                 continue
 
             if status_norm in stop_statuses:
-                logger.warning("????? %s ??? %s??????", name, status)
+                logger.warning("Container %s status %s; attempting restart.", name, status)
                 await self.restart_container()
                 await asyncio.sleep(poll_interval)
                 continue
 
-            logger.info("????? %s ??? %s??????????", name, status or "")
+            logger.info("Container %s status %s; proceeding to normal run.", name, status or "")
             break
 
     async def restart_container(self) -> None:
-        """?? ACS ???????"""
+        """Call ACS restart API for the container."""
         acs_cfg = self._acs_cfg(reload=True)
         name = acs_cfg.get("container_name")
         if not name:
-            logger.error("??? acs.container_name????????")
+            logger.error("acs.container_name missing; cannot restart container.")
             return
 
         try:
             task = self.container_client.find_instance_by_name(name)
         except Exception as exc:
-            logger.error("???? %s ???????: %s", name, exc)
+            logger.error("Failed to query container %s, cannot restart: %s", name, exc)
             return
 
         if not task:
-            logger.error("????? %s??????", name)
+            logger.error("Container %s not found; cannot restart.", name)
             return
 
         task_id = task.get("instanceServiceId") or task.get("id")
         if not task_id:
-            logger.error("?? %s ?? instanceServiceId??????", name)
+            logger.error("Container %s lacks instanceServiceId; cannot restart.", name)
             return
 
-        logger.warning("?????? %s?task id: %s?", name, task_id)
+        logger.warning("Attempting to restart container %s (task id: %s)", name, task_id)
         try:
             resp = self.container_client.restart_task(task_id)
         except Exception as exc:
-            logger.error("????????: %s", exc)
+            logger.error("Restart API call failed: %s", exc)
             return
 
         if str(resp.get("code")) == "0":
-            logger.info("??????: %s", resp)
+            logger.info("Restart request succeeded: %s", resp)
             self.state["last_restart"] = dt.datetime.now()
         else:
-            logger.error("??????: %s", resp)
+            logger.error("Restart request failed: %s", resp)
 
     # ------------------------------------------------------------------
-    # ???????????
+    # Time parsing and monitoring
     # ------------------------------------------------------------------
 
     def _parse_start_time(self, value: Optional[str]) -> Optional[dt.datetime]:
-        """?? ACS ??? startTime/createTime ????"""
+        """Parse startTime/createTime string returned by ACS."""
         if not value:
             return None
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
@@ -235,7 +233,7 @@ class ContainerManager:
         return None
 
     def _parse_timeout_limit(self, value: Optional[str]) -> Optional[dt.timedelta]:
-        """?? timeoutLimit??? '360:00:00'?? timedelta?"""
+        """Parse timeoutLimit (e.g. '360:00:00') into timedelta."""
         if not value:
             return None
         parts = str(value).split(":")
@@ -254,11 +252,11 @@ class ContainerManager:
         slow_interval: int = 300,
         fast_interval: int = 30,
     ) -> None:
-        """????????????????????????????????"""
+        """Poll container status; speed up near timeout and auto-restart when stopped."""
         acs_cfg = self._acs_cfg(reload=True)
         name = acs_cfg.get("container_name")
         if not name:
-            logger.warning("??? acs.container_name????????")
+            logger.warning("acs.container_name not configured; skipping container monitoring.")
             return
 
         stop_statuses = {"terminated", "stopped", "stop", "failed"}
@@ -270,7 +268,7 @@ class ContainerManager:
                 try:
                     info = self.container_client.get_container_instance_info_by_name(name)
                 except Exception as exc:
-                    # ?????????? 401??????????????
+                    # If auth failure (e.g., 401), re-login then retry once
                     try:
                         if hasattr(exc, "response") and getattr(exc.response, "status_code", None) == 401:  # type: ignore[attr-defined]
                             self.container_client.login()
@@ -288,7 +286,7 @@ class ContainerManager:
                     if ip:
                         await self.handle_new_ip(ip)
 
-                    # ?? startTime + timeoutLimit ???????????????
+                    # Compute expected shutdown and remaining time from startTime + timeoutLimit
                     start_dt = self._parse_start_time(start_time_str)
                     timeout = self._parse_timeout_limit(info.get("timeoutLimit"))
                     now = dt.datetime.now()
@@ -301,28 +299,25 @@ class ContainerManager:
                             remaining_sec = int(remaining) if remaining > 0 else 0
                             self.state["remaining_seconds"] = remaining_sec
 
-                            # ??????????????
+                            # Human-friendly remaining time string
                             if remaining_sec > 0:
                                 days = remaining_sec // 86400
                                 hours_left = (remaining_sec % 86400) // 3600
                                 mins_left = (remaining_sec % 3600) // 60
                                 parts: List[str] = []
                                 if days > 0:
-                                    parts.append(f"{days} ?")
+                                    parts.append(f"{days} days")
                                 if hours_left > 0:
-                                    parts.append(f"{hours_left} ??")
+                                    parts.append(f"{hours_left} hours")
                                 if mins_left > 0 or not parts:
-                                    parts.append(f"{mins_left} ??")
+                                    parts.append(f"{mins_left} minutes")
                                 self.state["remaining_time_str"] = " ".join(parts)
                             else:
-                                self.state["remaining_time_str"] = "0 ??"
+                                self.state["remaining_time_str"] = "0 minutes"
 
-                            # ??????????????????
+                            # Switch to fast polling near shutdown
                             threshold = next_shutdown - dt.timedelta(minutes=pre_shutdown_minutes)
-                            if now >= threshold:
-                                interval = fast_interval
-                            else:
-                                interval = slow_interval
+                            interval = fast_interval if now >= threshold else slow_interval
                         except Exception:
                             self.state["next_shutdown"] = None
                             self.state["remaining_seconds"] = None
@@ -337,30 +332,29 @@ class ContainerManager:
 
                     status_norm = (status or "").lower()
 
-                    # Waiting ??????????????????????
+                    # Waiting: treat as queued; do not restart but poll faster
                     if status_norm in waiting_statuses:
-                        logger.info("?? %s ????? Waiting??????????", name)
+                        logger.info("Container %s is Waiting (queued); waiting for scheduling.", name)
                         interval = min(interval, fast_interval)
 
                     if status_norm in stop_statuses:
-                        logger.warning("?? %s ??? %s????????", name, status)
+                        logger.warning("Container %s status %s; auto-restart triggered.", name, status)
                         await self.restart_container()
                         interval = fast_interval
                 else:
-                    logger.warning("?? %s ??????????????", name)
+                    logger.warning("Container %s not found; retrying quickly.", name)
                     interval = fast_interval
-            except Exception as exc:  # pragma: no cover - ??/API ??
-                logger.error("??????: %s", exc)
+            except Exception as exc:  # pragma: no cover - network/API errors
+                logger.error("Monitor loop exception: %s", exc)
                 interval = fast_interval
 
             await asyncio.sleep(interval)
-
     # ------------------------------------------------------------------
-    # SSH ???????
+    # SSH ports and tunnel management
     # ------------------------------------------------------------------
 
     def _forward_ports(self, ssh_cfg: Dict[str, Any]) -> List[int]:
-        """???????????????? -L ??????"""
+        """Collect local listening ports (only -L forwards)."""
         ports: List[int] = []
         forwards = ssh_cfg.get("forwards") or []
         for spec in forwards:
@@ -370,18 +364,18 @@ class ContainerManager:
         return ports
 
     def _ports_available(self, ports: List[int]) -> bool:
-        """???????????????"""
+        """Try binding ports to check availability."""
         for p in ports:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 try:
                     s.bind(("127.0.0.1", p))
                 except OSError:
-                    logger.error("???? %s ????????????????", p)
+                    logger.error("Local port %s is in use; will attempt cleanup before retry.", p)
                     return False
         return True
 
     def _kill_ssh_on_ports(self, ports: List[int]) -> None:
-        """???????????????? ssh ???"""
+        """Kill current-user ssh processes that occupy these ports locally."""
         current_user = getpass.getuser()
         targets: List[int] = []
         for conn in psutil.net_connections(kind="inet"):
@@ -401,7 +395,7 @@ class ContainerManager:
         for pid in targets:
             try:
                 proc = psutil.Process(pid)
-                logger.warning("????????? ssh ?? pid=%s", pid)
+                logger.warning("Force-killing local ssh process on port: pid=%s", pid)
                 proc.terminate()
                 try:
                     proc.wait(timeout=2)
@@ -420,7 +414,7 @@ class ContainerManager:
         jump: Optional[str] = None,
         allow_sudo: bool = True,
     ) -> None:
-        """?????????????????????? fuser?????? sudo??"""
+        """On a remote host, kill processes occupying specific ports (prefers fuser; sudo optional)."""
         if not host or not user or not ports:
             return
 
@@ -459,16 +453,16 @@ class ContainerManager:
             out = res.stdout.decode(errors="ignore").strip()
             err = res.stderr.decode(errors="ignore").strip()
             if res.returncode != 0:
-                logger.debug("????????? %s", res.returncode)
+                logger.debug("Remote port cleanup return code %s", res.returncode)
                 if err:
-                    logger.debug("?????? stderr: %s", err)
+                    logger.debug("Remote port cleanup stderr: %s", err)
             elif out:
-                logger.debug("????????: %s", out)
+                logger.debug("Remote port cleanup stdout: %s", out)
         except Exception as exc:
-            logger.info("????????: %s", exc)
+            logger.info("Remote port cleanup failed: %s", exc)
 
     def _remote_cleanup_ports(self, ports: List[int]) -> None:
-        """??????????????????????"""
+        """Attempt to clean ports on bastion and container hosts."""
         ssh_cfg = self._ssh_cfg(reload=True)
         mode = (ssh_cfg.get("mode") or "jump").lower()
         bastion_host = ssh_cfg.get("bastion_host") or ssh_cfg.get("remote_server_ip")
@@ -503,7 +497,7 @@ class ContainerManager:
             )
 
     def _reverse_specs(self, ssh_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """???????? reverse_forwards(local->remote[, intermediate])?"""
+        """Build reverse forwarding rules: reverse_forwards(local->remote[, intermediate])."""
         local_open_port = ssh_cfg.get("local_open_port")
         container_open_port = ssh_cfg.get("container_open_port")
         intermediate_port = ssh_cfg.get("intermediate_port")
@@ -534,7 +528,7 @@ class ContainerManager:
         retries: int = 3,
         delay: float = 1.0,
     ) -> bool:
-        """???????????????/?????????"""
+        """Before rebuilding a tunnel, try releasing local/remote ports with retries."""
         for attempt in range(retries):
             if self._ports_available(ports):
                 return True
@@ -546,14 +540,14 @@ class ContainerManager:
         return self._ports_available(ports)
 
     def build_ssh_command(self, *, reload_config: bool = True) -> List[str]:
-        """?? ssh ????? direct / jump / double ?????"""
+        """Build ssh command supporting direct / jump / double modes."""
         ssh_cfg = self._ssh_cfg(reload=reload_config)
 
         target_ip = self.state.get("container_ip") or ssh_cfg.get("container_ip")
         if not target_ip:
             target_ip = self.resolve_container_ip()
         if not target_ip:
-            raise ValueError("?? IP ???????????")
+            raise ValueError("Container IP unknown; not captured or configured.")
 
         mode = (ssh_cfg.get("mode") or "jump").lower()
         target_user = ssh_cfg.get("target_user", "root")
@@ -567,7 +561,7 @@ class ContainerManager:
         container_open_port = ssh_cfg.get("container_open_port")
 
         if password_login and password:
-            logger.info("????????????????????????????")
+            logger.info("Password login configured; ensure keys/password handling is set correctly.")
 
         def add_port(base: List[str], port_value: Any) -> None:
             if port_value:
@@ -601,15 +595,15 @@ class ContainerManager:
         if mode == "double":
             if not bastion_host:
                 raise ValueError(
-                    "double ?????? ssh.bastion_host ? ssh.remote_server_ip?",
+                    "double mode requires ssh.bastion_host or ssh.remote_server_ip.",
                 )
             revs = self._reverse_specs(ssh_cfg)
             if any(spec.get("mid") is None for spec in revs):
                 raise ValueError(
-                    "double ????????? intermediate_port ??? reverse_forwards.intermediate?",
+                    "double mode reverse forwarding needs intermediate_port or each reverse_forwards.intermediate.",
                 )
 
-            # ????? -> ???
+            # Outer: local -> bastion
             outer: List[str] = ["ssh", "-T"] + keepalive
             add_port(outer, ssh_port)
             add_forwards(outer, remote_host="localhost")
@@ -617,7 +611,7 @@ class ContainerManager:
                 outer.extend(["-R", f"{spec['mid']}:localhost:{spec['local']}"])
             outer.append(f"{bastion_user}@{bastion_host}")
 
-            # ?????? -> ??
+            # Inner: bastion -> container
             inner: List[str] = ["ssh", "-T", "-N"] + keepalive
             add_port(inner, ssh_cfg.get("container_port") or ssh_port)
             for spec in revs:
@@ -626,19 +620,19 @@ class ContainerManager:
             outer.append(" ".join(inner))
             return outer
 
-        # direct / jump ??
+        # direct / jump mode
         cmd: List[str] = ["ssh", "-T", "-N"] + keepalive
         add_port(cmd, ssh_port)
         if mode == "jump":
             if not bastion_host:
                 raise ValueError(
-                    "jump ?????? ssh.bastion_host ? ssh.remote_server_ip?",
+                    "jump mode requires ssh.bastion_host or ssh.remote_server_ip.",
                 )
             cmd.extend(["-J", f"{bastion_user}@{bastion_host}"])
 
         add_forwards(cmd, remote_host="localhost")
 
-        # ??????????????????????? -R
+        # Optional default reverse proxy port in single-layer mode
         if local_open_port and container_open_port:
             cmd.extend([
                 "-R",
@@ -649,20 +643,20 @@ class ContainerManager:
         return cmd
 
     def build_tunnel_command(self) -> List[str]:
-        """??????????? ssh ?????"""
+        """Build the actual ssh tunnel command used for port forwarding."""
         base = self.build_ssh_command()
         mode = (self._ssh_cfg(reload=False).get("mode") or "jump").lower()
         if mode == "double":
             return base
-        # ???????????? ssh -N???????
+        # For non-double modes, wrap with a top-level ssh -N for process management
         return ["ssh", "-o", "ExitOnForwardFailure=yes", "-N"] + base[1:]
 
     # ------------------------------------------------------------------
-    # SSH ??????
+    # SSH tunnel lifecycle
     # ------------------------------------------------------------------
 
     async def start_tunnel(self) -> None:
-        """?? SSH ?????????????"""
+        """Start the SSH tunnel if it is not already running."""
         async with self._proc_lock:
             if self._tunnel_process and self._tunnel_process.returncode is None:
                 return
@@ -673,49 +667,49 @@ class ContainerManager:
                     try:
                         self.container_client.login()
                     except Exception as exc:
-                        logger.error("???? IP ??????: %s", exc)
+                        logger.error("Login failed before fetching container IP: %s", exc)
                     target_ip = (
                         self.state.get("container_ip")
                         or self.resolve_container_ip(force_login=False)
                         or self.resolve_container_ip(force_login=True)
                     )
                     if not target_ip:
-                        raise ValueError("?? IP ??????????")
+                        raise ValueError("Container IP unknown; cannot start tunnel.")
 
                 reverse_specs = self._reverse_specs(ssh_cfg)
                 ports = self._forward_ports(ssh_cfg)
 
-                # ???????????????????? ssh ??
+                # Pre-clean remote ports for reverse forwarding
                 remote_ports = [spec["remote"] for spec in reverse_specs if spec.get("remote")]
                 intermediate_ports = [spec["mid"] for spec in reverse_specs if spec.get("mid")]
                 if reverse_specs:
                     logger.info(
-                        "????????: container=%s, intermediate=%s",
+                        "Attempting remote port cleanup: container=%s, intermediate=%s",
                         remote_ports,
                         intermediate_ports,
                     )
                     self._remote_cleanup_ports(remote_ports + intermediate_ports)
                     await asyncio.sleep(1.0)
 
-                # ??????????????????????? ssh ??
+                # Ensure local ports are free before starting, and clean local ssh holders
                 if ports and not await self._ensure_ports_free(ports):
                     self.state["tunnel_status"] = "error"
                     return
 
                 cmd = self.build_tunnel_command()
             except Exception as exc:
-                logger.error("????????: %s", exc)
+                logger.error("Cannot build tunnel command: %s", exc)
                 self.state["tunnel_status"] = "error"
                 return
 
-            logger.info("?? SSH ??: %s", " ".join(cmd))
+            logger.info("Starting SSH tunnel: %s", " ".join(cmd))
             proc = await asyncio.create_subprocess_exec(*cmd)
             self._tunnel_process = proc
             self.state["tunnel_status"] = "running"
             self._tunnel_started_once = True
 
     async def stop_tunnel(self) -> None:
-        """?? SSH ????????"""
+        """Stop SSH tunnel and update state."""
         async with self._proc_lock:
             proc = self._tunnel_process
             if not proc:
@@ -731,12 +725,12 @@ class ContainerManager:
             self._tunnel_process = None
 
     async def restart_tunnel(self) -> None:
-        """?????????????????"""
+        """Restart tunnel to refresh forwarding rules and ports."""
         await self.stop_tunnel()
         await self.start_tunnel()
 
     async def maintain_tunnel(self) -> None:
-        """?????????????????????????? IP?"""
+        """Keep tunnel alive; auto-restart on failures, refresh IP after repeated failures."""
         while not self._stop_requested:
             await self.start_tunnel()
             proc = self._tunnel_process
@@ -747,37 +741,37 @@ class ContainerManager:
                 rc = await proc.wait()
                 if rc == 0:
                     self._tunnel_failure_count = 0
-                    logger.info("SSH ???????")
+                    logger.info("SSH tunnel exited normally.")
                 else:
                     self._tunnel_failure_count += 1
                     logger.warning(
-                        "SSH ????? %s?????????????: %s??",
+                        "SSH tunnel exit code %s; will restart shortly (consecutive failures: %s).",
                         rc,
                         self._tunnel_failure_count,
                     )
                     if self._tunnel_failure_count >= 3:
                         name = self._acs_cfg(reload=True).get("container_name")
                         logger.warning(
-                            "SSH ?????? >=3 ?????? API ???? IP???: %s??",
+                            "SSH tunnel failed >=3 times; refreshing container IP via API (container: %s).",
                             name,
                         )
                         self.resolve_container_ip(force_login=True)
                         self._tunnel_failure_count = 0
-            except Exception as exc:  # pragma: no cover - ?????
-                logger.error("SSH ????: %s", exc)
+            except Exception as exc:  # pragma: no cover - child process errors
+                logger.error("SSH tunnel crashed: %s", exc)
             finally:
                 await self.stop_tunnel()
             await asyncio.sleep(3)
 
     async def shutdown(self) -> None:
-        """??????????? SSH ???"""
+        """Signal shutdown and close SSH tunnel."""
         self._stop_requested = True
         await self.stop_tunnel()
 
     # ------------------------------------------------------------------
-    # ????
+    # State snapshot
     # ------------------------------------------------------------------
 
     def snapshot(self) -> Dict[str, Any]:
-        """?????????? Web UI ????"""
+        """Return current state snapshot (for Web UI)."""
         return dict(self.state)
