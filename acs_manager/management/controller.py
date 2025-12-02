@@ -433,7 +433,7 @@ for p in {plist}; do
     $PREF ss -ltnp | awk -F'pid=' '$0 ~ /:$p/ {{print $2}}' | awk '{{print $1}}' | tr -d ',' | xargs -r $PREF kill -9
   fi
   if command -v fuser >/dev/null 2>&1; then
-    $PREF fuser -k ${p}/tcp
+    $PREF fuser -k ${{p}}/tcp
   fi
 done
 """.format(plist=plist, use_sudo="true" if allow_sudo else "false")
