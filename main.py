@@ -24,7 +24,14 @@ async def start_web_ui(web_cfg: dict[str, Any]) -> None:
     host = web_cfg.get("host", "0.0.0.0")
     port = int(web_cfg.get("port", 8000))
     log_level = web_cfg.get("log_level", "info")
-    config = uvicorn.Config(web_app.app, host=host, port=port, log_level=log_level)
+    root_path = web_cfg.get("root_path", "")
+    config = uvicorn.Config(
+        web_app.app,
+        host=host,
+        port=port,
+        log_level=log_level,
+        root_path=root_path,
+    )
     server = uvicorn.Server(config)
     await server.serve()
 
@@ -82,6 +89,7 @@ async def run(config_path: str, log_level: str) -> None:
     )
 
     web_cfg = store.get_section("webui", default={}, reload=True)
+    web_app.set_root_path(web_cfg.get("root_path", ""))
 
     # 先启动 WebUI 与抓包，让界面可用
     sniffer_task = asyncio.create_task(sniffer.start())

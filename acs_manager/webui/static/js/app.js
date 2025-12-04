@@ -1,10 +1,16 @@
 (() => {
   'use strict';
 
+  const basePath = (document.body.getAttribute('data-base-path') || '').replace(/\/+$/, '');
   const page = document.body.getAttribute('data-page') || '';
 
+  const withBase = (path) => {
+    const normalized = path.startsWith('/') ? path : `/${path}`;
+    return `${basePath}${normalized}` || '/';
+  };
+
   async function fetchJSON(url, options) {
-    const res = await fetch(url, options);
+    const res = await fetch(withBase(url), options);
     if (!res.ok) {
       let text;
       try {
@@ -141,7 +147,7 @@
     if (!area || !status) return;
     try {
       const parsed = JSON.parse(area.value);
-      const res = await fetch('/config', {
+      const res = await fetch(withBase('/config'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(parsed),
@@ -207,4 +213,3 @@
   if (page === 'config') initConfig();
   if (page === 'logs') initLogs();
 })();
-

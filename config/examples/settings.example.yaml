@@ -39,6 +39,7 @@ ssh:
 webui:
   host: "0.0.0.0"                          # Web UI 绑定地址
   port: 8000                               # Web UI 端口
+  root_path: ""                            # 可选：部署到子路径（如 /acsmanager）时填入前缀
 
 logging:
   level: INFO                              # 日志级别 (DEBUG/INFO/WARNING/ERROR)

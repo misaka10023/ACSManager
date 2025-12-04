@@ -44,6 +44,11 @@ def bind_config_store(store: ConfigStore) -> None:
     config_store = store
 
 
+def set_root_path(root_path: str | None) -> None:
+    """Allow runtime override of app root path for sub-path deployments."""
+    app.root_path = (root_path or "").rstrip("/")
+
+
 # -----------------------
 # JSON API (unchanged)
 # -----------------------
@@ -204,13 +209,13 @@ def tail_logs(lines: int = Query(200, ge=1, le=2000)) -> dict:
 # UI pages
 # -----------------------
 @app.get("/", response_class=RedirectResponse)
-def ui_root() -> RedirectResponse:
-    return RedirectResponse(url="/ui/dashboard")
+def ui_root(request: Request) -> RedirectResponse:
+    return RedirectResponse(url=request.url_for("ui_dashboard"))
 
 
 @app.get("/ui", response_class=RedirectResponse)
-def ui_home() -> RedirectResponse:
-    return RedirectResponse(url="/ui/dashboard")
+def ui_home(request: Request) -> RedirectResponse:
+    return RedirectResponse(url=request.url_for("ui_dashboard"))
 
 
 @app.get("/ui/dashboard", response_class=HTMLResponse)

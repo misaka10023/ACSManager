@@ -5,16 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ACS Manager</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="/static/css/main.css" />
+  <link rel="stylesheet" href="{{ url_for('static', path='css/main.css') }}" />
 </head>
-<body class="bg-slate-50 text-slate-900" data-page="{{ page|default('') }}">
+<body class="bg-slate-50 text-slate-900" data-page="{{ page|default('') }}" data-base-path="{{ request.scope.get('root_path', '') }}">
   <header class="bg-white shadow-sm">
     <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
       <div class="text-xl font-semibold text-slate-800">ACS Manager</div>
       <nav class="flex gap-4 text-sm font-medium">
-        <a href="/ui/dashboard" class="nav-link" data-page="dashboard">Dashboard</a>
-        <a href="/ui/config" class="nav-link" data-page="config">Config</a>
-        <a href="/ui/logs" class="nav-link" data-page="logs">Logs</a>
+        <a href="{{ request.url_for('ui_dashboard') }}" class="nav-link" data-page="dashboard">Dashboard</a>
+        <a href="{{ request.url_for('ui_config') }}" class="nav-link" data-page="config">Config</a>
+        <a href="{{ request.url_for('ui_logs') }}" class="nav-link" data-page="logs">Logs</a>
       </nav>
     </div>
   </header>
@@ -30,6 +30,6 @@
       }
     });
   </script>
-  <script src="/static/js/app.js"></script>
+  <script src="{{ url_for('static', path='js/app.js') }}"></script>
 </body>
 </html>
