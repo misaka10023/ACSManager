@@ -23,6 +23,29 @@ STATIC_DIR = BASE_DIR / "static"
 
 app = FastAPI(title="ACS Manager UI", version="0.2.0")
 
+
+class RootPathPrefixMiddleware:
+    """Strip configured root_path prefix from incoming requests so routing works under subpaths."""
+
+    def __init__(self, app: FastAPI, prefix: str) -> None:
+        self.app = app
+        normalized = (prefix or "").rstrip("/")
+        if normalized and not normalized.startswith("/"):
+            normalized = "/" + normalized
+        self.prefix = normalized
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> Any:  # type: ignore[override]
+        if not self.prefix or scope.get("type") not in {"http", "websocket"}:
+            return await self.app(scope, receive, send)
+        path = scope.get("path", "")
+        if not path.startswith(self.prefix):
+            return await self.app(scope, receive, send)
+        new_scope = dict(scope)
+        new_scope["root_path"] = self.prefix
+        trimmed = path[len(self.prefix) :] or "/"
+        new_scope["path"] = trimmed
+        return await self.app(new_scope, receive, send)
+
 # mount static assets
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -32,6 +55,7 @@ templates = Jinja2Templates(directory=TEMPLATES_DIR)
 manager: Optional[ContainerManager] = None
 config_store: Optional[ConfigStore] = None
 LOG_DIR = Path("logs")
+_root_path_middleware_added = False
 
 
 def bind_manager(instance: ContainerManager) -> None:
@@ -46,7 +70,14 @@ def bind_config_store(store: ConfigStore) -> None:
 
 def set_root_path(root_path: str | None) -> None:
     """Allow runtime override of app root path for sub-path deployments."""
-    app.root_path = (root_path or "").rstrip("/")
+    global _root_path_middleware_added
+    cleaned = (root_path or "").rstrip("/")
+    if cleaned and not cleaned.startswith("/"):
+        cleaned = "/" + cleaned
+    app.root_path = cleaned
+    if cleaned and not _root_path_middleware_added:
+        app.add_middleware(RootPathPrefixMiddleware, prefix=cleaned)
+        _root_path_middleware_added = True
 
 
 # -----------------------
