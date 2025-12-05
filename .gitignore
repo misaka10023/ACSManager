@@ -6,6 +6,7 @@ config/settings.yaml
 .idea/
 .venv/
 __pycache__/
+logs/
 
 # IntelliJ IDEA local files (merged from .idea/.gitignore)
 /shelf/
