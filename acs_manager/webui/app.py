@@ -1,13 +1,17 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import base64
 import datetime as dt
+import hashlib
+import hmac
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import Body, FastAPI, HTTPException, Query, Request
+from fastapi import Body, Depends, FastAPI, Form, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -56,6 +60,8 @@ manager: Optional[ContainerManager] = None
 config_store: Optional[ConfigStore] = None
 LOG_DIR = Path("logs")
 _root_path_middleware_added = False
+SESSION_COOKIE = "acsui_session"
+DEFAULT_SECRET = "change-me-please"
 
 
 def bind_manager(instance: ContainerManager) -> None:
@@ -80,6 +86,95 @@ def set_root_path(root_path: str | None) -> None:
         _root_path_middleware_added = True
 
 
+def _auth_settings(reload: bool = False) -> Dict[str, Any]:
+    defaults = {
+        "enabled": False,
+        "username": "",
+        "password": "",
+        "password_hash": "",
+        "secret_key": DEFAULT_SECRET,
+        "session_ttl": 60 * 60 * 12,  # 12h
+    }
+    if config_store:
+        try:
+            webui_cfg = config_store.get_section("webui", default={}, reload=reload)
+            auth_cfg = (webui_cfg.get("auth") or {}) if isinstance(webui_cfg, dict) else {}
+            defaults.update(
+                {
+                    "enabled": bool(auth_cfg.get("enabled")),
+                    "username": auth_cfg.get("username", ""),
+                    "password": auth_cfg.get("password", ""),
+                    "password_hash": auth_cfg.get("password_hash", ""),
+                    "secret_key": auth_cfg.get("secret_key", DEFAULT_SECRET),
+                    "session_ttl": int(auth_cfg.get("session_ttl", defaults["session_ttl"])),
+                }
+            )
+        except Exception as exc:
+            logger.warning("Failed to load auth config: %s", exc)
+    return defaults
+
+
+def _verify_password(input_pw: str, auth_cfg: Dict[str, Any]) -> bool:
+    stored_hash = (auth_cfg.get("password_hash") or "").strip()
+    stored_pw = (auth_cfg.get("password") or "").strip()
+    if stored_hash:
+        digest = hashlib.sha256(input_pw.encode("utf-8")).hexdigest()
+        return hmac.compare_digest(digest, stored_hash)
+    if stored_pw:
+        return hmac.compare_digest(stored_pw, input_pw)
+    return False
+
+
+def _sign_session(username: str, secret_key: str, ttl_seconds: int) -> str:
+    expires_at = int(time.time()) + int(ttl_seconds)
+    payload = f"{username}:{expires_at}"
+    sig = hmac.new(secret_key.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    token = f"{payload}:{sig}"
+    return base64.urlsafe_b64encode(token.encode("utf-8")).decode("ascii")
+
+
+def _decode_session(token: str, secret_key: str) -> Optional[str]:
+    if not token:
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
+        username, exp_str, sig = raw.split(":", 2)
+        expected_sig = hmac.new(secret_key.encode("utf-8"), f"{username}:{exp_str}".encode("utf-8"), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected_sig):
+            return None
+        if int(exp_str) < int(time.time()):
+            return None
+        return username
+    except Exception:
+        return None
+
+
+def _current_user(request: Request, auth_cfg: Dict[str, Any]) -> Optional[str]:
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        return None
+    return _decode_session(token, auth_cfg.get("secret_key", DEFAULT_SECRET))
+
+
+def require_auth(request: Request) -> str:
+    auth_cfg = _auth_settings(reload=False)
+    if not auth_cfg.get("enabled"):
+        return ""
+    user = _current_user(request, auth_cfg)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return user
+
+
+def _maybe_redirect_login(request: Request, auth_cfg: Dict[str, Any]) -> Optional[RedirectResponse]:
+    if not auth_cfg.get("enabled"):
+        return None
+    user = _current_user(request, auth_cfg)
+    if user:
+        return None
+    return RedirectResponse(url=request.url_for("ui_login"), status_code=303)
+
+
 # -----------------------
 # JSON API (unchanged)
 # -----------------------
@@ -89,14 +184,14 @@ def health() -> dict[str, str]:
 
 
 @app.get("/state")
-def state() -> dict:
+def state(user: str = Depends(require_auth)) -> dict:
     if manager is None:
         raise HTTPException(status_code=503, detail="Manager not wired to web UI yet")
     return manager.snapshot()
 
 
 @app.get("/container-ip")
-def container_ip() -> dict:
+def container_ip(user: str = Depends(require_auth)) -> dict:
     if manager is None:
         raise HTTPException(status_code=503, detail="Manager not wired to web UI yet")
     ip = manager.snapshot().get("container_ip")
@@ -131,7 +226,7 @@ def container_ip() -> dict:
 
 
 @app.get("/config")
-def get_config(reload: bool = True) -> dict:
+def get_config(reload: bool = True, user: str = Depends(require_auth)) -> dict:
     if config_store is None:
         raise HTTPException(status_code=503, detail="Config store not ready")
     return config_store.read(reload=reload)
@@ -191,7 +286,7 @@ async def _post_config_change(old_cfg: Dict[str, Any], new_cfg: Dict[str, Any]) 
 
 
 @app.patch("/config")
-async def patch_config(payload: dict = Body(..., embed=False)) -> dict:
+async def patch_config(payload: dict = Body(..., embed=False), user: str = Depends(require_auth)) -> dict:
     if config_store is None:
         raise HTTPException(status_code=503, detail="Config store not ready")
     if not isinstance(payload, dict):
@@ -203,7 +298,7 @@ async def patch_config(payload: dict = Body(..., embed=False)) -> dict:
 
 
 @app.put("/config")
-async def replace_config(payload: dict = Body(..., embed=False)) -> dict:
+async def replace_config(payload: dict = Body(..., embed=False), user: str = Depends(require_auth)) -> dict:
     if config_store is None:
         raise HTTPException(status_code=503, detail="Config store not ready")
     if not isinstance(payload, dict):
@@ -224,7 +319,7 @@ def _latest_log_file() -> Path:
 
 
 @app.get("/logs")
-def tail_logs(lines: int = Query(200, ge=1, le=2000)) -> dict:
+def tail_logs(lines: int = Query(200, ge=1, le=2000), user: str = Depends(require_auth)) -> dict:
     """Return the tail of the latest log file."""
     try:
         log_path = _latest_log_file()
@@ -234,6 +329,63 @@ def tail_logs(lines: int = Query(200, ge=1, le=2000)) -> dict:
     content_lines = log_path.read_text(encoding="utf-8").splitlines()
     tail = content_lines[-lines:] if len(content_lines) > lines else content_lines
     return {"file": str(log_path), "lines": len(tail), "content": tail}
+
+
+# -----------------------
+# Auth pages
+# -----------------------
+@app.get("/ui/login", response_class=HTMLResponse)
+def ui_login(request: Request) -> HTMLResponse:
+    auth_cfg = _auth_settings()
+    if not auth_cfg.get("enabled"):
+        return RedirectResponse(url=request.url_for("ui_dashboard"))
+    if _current_user(request, auth_cfg):
+        return RedirectResponse(url=request.url_for("ui_dashboard"), status_code=303)
+    return templates.TemplateResponse(
+        "login.html",
+        {"request": request, "page": "login", "error": "", "auth_enabled": auth_cfg.get("enabled")},
+    )
+
+
+@app.post("/ui/login", response_class=HTMLResponse)
+def ui_login_submit(
+    request: Request,
+    response: Response,
+    username: str = Form(...),
+    password: str = Form(...),
+) -> HTMLResponse:
+    auth_cfg = _auth_settings()
+    if not auth_cfg.get("enabled"):
+        return RedirectResponse(url=request.url_for("ui_dashboard"), status_code=303)
+
+    if hmac.compare_digest(username, auth_cfg.get("username", "")) and _verify_password(password, auth_cfg):
+        token = _sign_session(username, auth_cfg.get("secret_key", DEFAULT_SECRET), auth_cfg.get("session_ttl", 43200))
+        resp = RedirectResponse(url=request.url_for("ui_dashboard"), status_code=303)
+        cookie_path = app.root_path or "/"
+        resp.set_cookie(
+            SESSION_COOKIE,
+            token,
+            httponly=True,
+            samesite="lax",
+            max_age=auth_cfg.get("session_ttl", 43200),
+            path=cookie_path,
+        )
+        return resp
+
+    return templates.TemplateResponse(
+        "login.html",
+        {"request": request, "page": "login", "error": "用户名或密码错误", "auth_enabled": auth_cfg.get("enabled")},
+        status_code=401,
+    )
+
+
+@app.get("/ui/logout")
+def ui_logout(request: Request) -> RedirectResponse:
+    auth_cfg = _auth_settings()
+    target = request.url_for("ui_login") if auth_cfg.get("enabled") else request.url_for("ui_dashboard")
+    resp = RedirectResponse(url=target, status_code=303)
+    resp.delete_cookie(SESSION_COOKIE, path=app.root_path or "/")
+    return resp
 
 
 # -----------------------
@@ -251,11 +403,22 @@ def ui_home(request: Request) -> RedirectResponse:
 
 @app.get("/ui/dashboard", response_class=HTMLResponse)
 def ui_dashboard(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse("dashboard.html", {"request": request, "page": "dashboard"})
+    auth_cfg = _auth_settings()
+    redirect = _maybe_redirect_login(request, auth_cfg)
+    if redirect:
+        return redirect
+    return templates.TemplateResponse(
+        "dashboard.html",
+        {"request": request, "page": "dashboard", "auth_enabled": auth_cfg.get("enabled")},
+    )
 
 
 @app.get("/ui/config", response_class=HTMLResponse)
 def ui_config(request: Request) -> HTMLResponse:
+    auth_cfg = _auth_settings()
+    redirect = _maybe_redirect_login(request, auth_cfg)
+    if redirect:
+        return redirect
     cfg_text = ""
     if config_store:
         try:
@@ -264,10 +427,14 @@ def ui_config(request: Request) -> HTMLResponse:
             cfg_text = ""
     return templates.TemplateResponse(
         "config.html",
-        {"request": request, "page": "config", "config_json": cfg_text},
+        {"request": request, "page": "config", "config_json": cfg_text, "auth_enabled": auth_cfg.get("enabled")},
     )
 
 
 @app.get("/ui/logs", response_class=HTMLResponse)
 def ui_logs(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse("logs.html", {"request": request, "page": "logs"})
+    auth_cfg = _auth_settings()
+    redirect = _maybe_redirect_login(request, auth_cfg)
+    if redirect:
+        return redirect
+    return templates.TemplateResponse("logs.html", {"request": request, "page": "logs", "auth_enabled": auth_cfg.get("enabled")})
