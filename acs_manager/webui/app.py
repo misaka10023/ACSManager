@@ -42,12 +42,13 @@ class RootPathPrefixMiddleware:
         if not self.prefix or scope.get("type") not in {"http", "websocket"}:
             return await self.app(scope, receive, send)
         path = scope.get("path", "")
-        if not path.startswith(self.prefix):
-            return await self.app(scope, receive, send)
+        new_path = path
+        # 如果路径前面重复包含 prefix（例如 /acsmanager/acsmanager/...），逐次剥离
+        while new_path.startswith(self.prefix):
+            new_path = new_path[len(self.prefix) :] or "/"
         new_scope = dict(scope)
         new_scope["root_path"] = self.prefix
-        trimmed = path[len(self.prefix) :] or "/"
-        new_scope["path"] = trimmed
+        new_scope["path"] = new_path
         return await self.app(new_scope, receive, send)
 
 # mount static assets
