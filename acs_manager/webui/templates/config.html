@@ -9,7 +9,15 @@
     </div>
   </div>
   <p class="text-sm text-slate-600 mb-2">以 JSON 方式编辑完整配置。保存即调用 PUT /config。</p>
+  <div class="text-xs text-slate-600 mb-3 space-y-1">
+    <div><span class="font-semibold">常用字段：</span>acs.base_url / api_prefix / login_user / login_password / public_key；ssh.mode / bastion_host / target_user / forwards；webui.root_path / webui.auth.*。</div>
+    <div><span class="font-semibold">注意：</span>如使用 password_hash，请清空 password；root_path 需与 Nginx 前缀一致（如 /acsmanager）。</div>
+  </div>
   <textarea id="cfg-editor" class="w-full h-96 font-mono text-sm border rounded p-3 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-200">{{ config_json or "" }}</textarea>
   <div id="cfg-status" class="text-sm text-slate-600 mt-2"></div>
+</div>
+<div class="card mt-4">
+  <div class="card-title">示例模板（settings.example.yaml）</div>
+  <pre class="code-block h-72 overflow-y-auto text-xs whitespace-pre-wrap">{{ config_template or "未能读取示例模板" }}</pre>
 </div>
 {% endblock %}

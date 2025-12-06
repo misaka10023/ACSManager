@@ -419,14 +419,26 @@ def ui_config(request: Request) -> HTMLResponse:
     if redirect:
         return redirect
     cfg_text = ""
+    template_text = ""
+    example_path = BASE_DIR.parent.parent / "config" / "examples" / "settings.example.yaml"
     if config_store:
         try:
             cfg_text = json.dumps(config_store.read(reload=False), indent=2, ensure_ascii=False)
         except Exception:
             cfg_text = ""
+    try:
+        template_text = example_path.read_text(encoding="utf-8")
+    except Exception:
+        template_text = ""
     return templates.TemplateResponse(
         "config.html",
-        {"request": request, "page": "config", "config_json": cfg_text, "auth_enabled": auth_cfg.get("enabled")},
+        {
+            "request": request,
+            "page": "config",
+            "config_json": cfg_text,
+            "config_template": template_text,
+            "auth_enabled": auth_cfg.get("enabled"),
+        },
     )
 
 
