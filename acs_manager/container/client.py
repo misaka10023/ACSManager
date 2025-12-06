@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import requests
+from requests import HTTPError
 from Crypto.Cipher import PKCS1_v1_5
 from Crypto.PublicKey import RSA
 
@@ -175,12 +176,26 @@ class ContainerClient:
     # -----------------------
     # 任务 / 容器信息
     # -----------------------
+    def _request_json(self, method: str, url: str, *, retry_login: bool = False, **kwargs: Any) -> Dict[str, Any]:
+        """统一请求入口：若遇到 401 自动重登一次再重试。"""
+        try:
+            resp = self.session.request(method, url, **kwargs)
+            resp.raise_for_status()
+            return resp.json()
+        except HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            if status == 401 and not retry_login:
+                try:
+                    self.login()
+                except Exception:
+                    pass
+                return self._request_json(method, url, retry_login=True, **kwargs)
+            raise
+
     def list_tasks(self, start: int = 0, limit: int = 20, sort: str = "DESC") -> Dict[str, Any]:
         """获取任务列表：/api/instance-service/task。"""
         url = self._url_api("/api/instance-service/task")
-        resp = self.session.get(url, params={"start": start, "limit": limit, "sort": sort})
-        resp.raise_for_status()
-        return resp.json()
+        return self._request_json("get", url, params={"start": start, "limit": limit, "sort": sort})
 
     def get_related_tasks(self, instance_service_id: str, start: int = 0, limit: int = 20, sort: str = "DESC") -> Dict[str, Any]:
         """
@@ -190,7 +205,8 @@ class ContainerClient:
           /api/instance-service/related-tasks?start=0&limit=20&sort=DESC&id=<instanceServiceId>
         """
         url = self._url_api("/api/instance-service/related-tasks")
-        resp = self.session.get(
+        return self._request_json(
+            "get",
             url,
             params={
                 "start": start,
@@ -199,22 +215,16 @@ class ContainerClient:
                 "id": instance_service_id,
             },
         )
-        resp.raise_for_status()
-        return resp.json()
 
     def get_run_ips(self, instance_service_id: str) -> Dict[str, Any]:
         """通过 run-ips 获取容器 IP 列表。"""
         url = self._url_api(f"/api/instance-service/{instance_service_id}/run-ips")
-        resp = self.session.get(url)
-        resp.raise_for_status()
-        return resp.json()
+        return self._request_json("get", url)
 
     def get_container_monitor(self, instance_service_id: str) -> Dict[str, Any]:
         """获取容器运行状态详情（container-monitor 接口）。"""
         url = self._url_api(f"/api/instance/{instance_service_id}/container-monitor")
-        resp = self.session.get(url)
-        resp.raise_for_status()
-        return resp.json()
+        return self._request_json("get", url)
 
     def find_instance_by_name(self, name: str, *, start: int = 0, limit: int = 50) -> Optional[Dict[str, Any]]:
         """
@@ -363,7 +373,4 @@ class ContainerClient:
     def restart_task(self, task_id: str) -> Dict[str, Any]:
         """调用重启接口 /api/instance-service/task/actions/restart。"""
         url = self._url_api("/api/instance-service/task/actions/restart")
-        resp = self.session.post(url, json={"id": task_id})
-        resp.raise_for_status()
-        return resp.json()
-
+        return self._request_json("post", url, json={"id": task_id})
