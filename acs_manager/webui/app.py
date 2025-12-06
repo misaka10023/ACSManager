@@ -239,7 +239,7 @@ def state(user: str = Depends(require_auth)) -> dict:
 
 
 @app.get("/container-ip")
-def container_ip(user: str = Depends(require_auth)) -> dict:
+def container_ip() -> dict:
     if manager is None:
         raise HTTPException(status_code=503, detail="Manager not wired to web UI yet")
     ip = manager.snapshot().get("container_ip")
