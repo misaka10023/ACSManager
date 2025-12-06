@@ -210,7 +210,7 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/static/{path:path}")
+@app.get("/static/{path:path}", name="static")
 async def static_files(path: str, request: Request) -> Response:
     """
     Serve static assets from STATIC_DIR, respecting root_path via middleware.
