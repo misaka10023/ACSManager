@@ -113,7 +113,7 @@ class ContainerClient:
     # -----------------------
     # 登录相关
     # -----------------------
-    def login(self, auth_code: str = "") -> LoginResult:
+    def login(self, auth_code: str = "", *, force: bool = False) -> LoginResult:
         """
         登录 ACS：
         - 若 acs.cookies 已配置（且非空）则直接复用；
@@ -124,11 +124,12 @@ class ContainerClient:
         password = cfg.get("login_password", "")
         user_type = cfg.get("user_type", "os")
         public_key_b64 = cfg.get("public_key", "")
-        preset_cookies = {k: v for k, v in (cfg.get("cookies", {}) or {}).items() if v}
+        preset_cookies = {} if force else {k: v for k, v in (cfg.get("cookies", {}) or {}).items() if v}
+
+        self.session.cookies.clear()
 
         if preset_cookies:
             # 直接复用配置中的 Cookie
-            self.session.cookies.clear()
             self._seed_cookies(preset_cookies)
             return LoginResult(True, None, self.session.cookies.get_dict(), {"msg": "use preset cookies"})
 
@@ -186,7 +187,7 @@ class ContainerClient:
             status = exc.response.status_code if exc.response is not None else None
             if status == 401 and not retry_login:
                 try:
-                    self.login()
+                    self.login(force=True)
                 except Exception:
                     pass
                 return self._request_json(method, url, retry_login=True, **kwargs)
