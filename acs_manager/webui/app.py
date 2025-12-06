@@ -46,7 +46,9 @@ class RootPathPrefixMiddleware:
             return await self.app(scope, receive, send)
         new_scope = dict(scope)
         new_scope["root_path"] = self.prefix
-        new_scope["path"] = path[len(self.prefix) :] or "/"
+        trimmed = path[len(self.prefix) :] or "/"
+        new_scope["path"] = trimmed
+        new_scope["raw_path"] = trimmed.encode()
         return await self.app(new_scope, receive, send)
 
 # mount static assets
