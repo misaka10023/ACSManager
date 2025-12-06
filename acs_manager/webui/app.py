@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import Body, Depends, FastAPI, Form, HTTPException, Query, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -50,6 +50,13 @@ class RootPathPrefixMiddleware:
         new_scope["path"] = trimmed
         new_scope["raw_path"] = trimmed.encode()
         return await self.app(new_scope, receive, send)
+
+
+@app.exception_handler(404)
+async def log_404(request: Request, exc: HTTPException) -> JSONResponse:
+    logger.warning("404 %s %s", request.method, request.url.path)
+    # Mirror default 404 response shape
+    return JSONResponse(status_code=404, content={"detail": exc.detail if isinstance(exc, HTTPException) else "Not Found"})
 
 # mount static assets
 if STATIC_DIR.exists():
