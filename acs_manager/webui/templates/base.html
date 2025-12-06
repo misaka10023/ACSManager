@@ -15,9 +15,9 @@
         <a href="{{ request.url_for('ui_dashboard') }}" class="nav-link" data-page="dashboard">Dashboard</a>
         <a href="{{ request.url_for('ui_config') }}" class="nav-link" data-page="config">Config</a>
         <a href="{{ request.url_for('ui_logs') }}" class="nav-link" data-page="logs">Logs</a>
-        {% if auth_enabled %}
+        {% if auth_enabled and is_authenticated %}
           <a href="{{ request.url_for('ui_logout') }}" class="nav-link" data-page="logout">Logout</a>
-        {% elif page != 'login' %}
+        {% elif auth_enabled and page != 'login' %}
           <a href="{{ request.url_for('ui_login') }}" class="nav-link" data-page="login">Login</a>
         {% endif %}
       </nav>

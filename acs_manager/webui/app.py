@@ -391,7 +391,13 @@ def ui_login(request: Request) -> HTMLResponse:
         return RedirectResponse(url=request.url_for("ui_dashboard"), status_code=303)
     return templates.TemplateResponse(
         "login.html",
-        {"request": request, "page": "login", "error": "", "auth_enabled": auth_cfg.get("enabled")},
+        {
+            "request": request,
+            "page": "login",
+            "error": "",
+            "auth_enabled": auth_cfg.get("enabled"),
+            "is_authenticated": False,
+        },
     )
 
 
@@ -422,7 +428,13 @@ def ui_login_submit(
 
     return templates.TemplateResponse(
         "login.html",
-        {"request": request, "page": "login", "error": "用户名或密码错误", "auth_enabled": auth_cfg.get("enabled")},
+        {
+            "request": request,
+            "page": "login",
+            "error": "用户名或密码错误",
+            "auth_enabled": auth_cfg.get("enabled"),
+            "is_authenticated": False,
+        },
         status_code=401,
     )
 
@@ -457,7 +469,12 @@ def ui_dashboard(request: Request) -> HTMLResponse:
         return redirect
     return templates.TemplateResponse(
         "dashboard.html",
-        {"request": request, "page": "dashboard", "auth_enabled": auth_cfg.get("enabled")},
+        {
+            "request": request,
+            "page": "dashboard",
+            "auth_enabled": auth_cfg.get("enabled"),
+            "is_authenticated": bool(_current_user(request, auth_cfg)),
+        },
     )
 
 
@@ -487,6 +504,7 @@ def ui_config(request: Request) -> HTMLResponse:
             "config_json": cfg_text,
             "config_template": template_text,
             "auth_enabled": auth_cfg.get("enabled"),
+            "is_authenticated": bool(_current_user(request, auth_cfg)),
         },
     )
 
@@ -497,4 +515,12 @@ def ui_logs(request: Request) -> HTMLResponse:
     redirect = _maybe_redirect_login(request, auth_cfg)
     if redirect:
         return redirect
-    return templates.TemplateResponse("logs.html", {"request": request, "page": "logs", "auth_enabled": auth_cfg.get("enabled")})
+    return templates.TemplateResponse(
+        "logs.html",
+        {
+            "request": request,
+            "page": "logs",
+            "auth_enabled": auth_cfg.get("enabled"),
+            "is_authenticated": bool(_current_user(request, auth_cfg)),
+        },
+    )
