@@ -13,7 +13,6 @@ from typing import Any, Dict, Optional
 
 from fastapi import Body, Depends, FastAPI, Form, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from acs_manager.config.store import ConfigStore
@@ -81,10 +80,6 @@ async def log_404(request: Request, exc: HTTPException) -> JSONResponse:
     # Mirror default 404 response shape
     detail = exc.detail if isinstance(exc, HTTPException) else "Not Found"
     return JSONResponse(status_code=404, content={"detail": detail})
-
-# mount static assets
-if STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
@@ -213,6 +208,27 @@ def _maybe_redirect_login(request: Request, auth_cfg: Dict[str, Any]) -> Optiona
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/static/{path:path}")
+async def static_files(path: str, request: Request) -> Response:
+    """
+    Serve static assets from STATIC_DIR, respecting root_path via middleware.
+    """
+    # 防止路径穿越
+    rel_path = Path(path)
+    full_path = (STATIC_DIR / rel_path).resolve()
+    try:
+        static_root = STATIC_DIR.resolve()
+    except Exception:
+        static_root = STATIC_DIR
+    if not str(full_path).startswith(str(static_root)):
+        logger.warning("Blocked static path traversal: %s -> %s", request.url.path, full_path)
+        raise HTTPException(status_code=404, detail="Not Found")
+    if not full_path.is_file():
+        logger.warning("Static file not found: %s -> %s", request.url.path, full_path)
+        raise HTTPException(status_code=404, detail="Not Found")
+    return Response(full_path.read_bytes(), media_type=None)
 
 
 @app.get("/state")
