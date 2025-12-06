@@ -54,9 +54,33 @@ class RootPathPrefixMiddleware:
 
 @app.exception_handler(404)
 async def log_404(request: Request, exc: HTTPException) -> JSONResponse:
-    logger.warning("404 %s %s", request.method, request.url.path)
+    url_path = request.url.path
+    fs_path: Optional[Path] = None
+
+    try:
+        # 还原静态文件在磁盘上的绝对路径，帮助排查工作目录/前缀问题
+        root = app.root_path or ""
+        if root and url_path.startswith(root + "/static"):
+            rel = url_path[len(root) :].lstrip("/")
+        elif url_path.startswith("/static"):
+            rel = url_path.lstrip("/")
+        else:
+            rel = ""
+        if rel.startswith("static/"):
+            rel = rel[len("static/") :]
+        if rel:
+            fs_path = (STATIC_DIR / rel).resolve()
+    except Exception:
+        fs_path = None
+
+    if fs_path is not None:
+        logger.warning("404 %s %s -> fs %s (root_path=%s)", request.method, url_path, fs_path, app.root_path)
+    else:
+        logger.warning("404 %s %s (root_path=%s)", request.method, url_path, app.root_path)
+
     # Mirror default 404 response shape
-    return JSONResponse(status_code=404, content={"detail": exc.detail if isinstance(exc, HTTPException) else "Not Found"})
+    detail = exc.detail if isinstance(exc, HTTPException) else "Not Found"
+    return JSONResponse(status_code=404, content={"detail": detail})
 
 # mount static assets
 if STATIC_DIR.exists():
