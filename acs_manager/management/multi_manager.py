@@ -20,6 +20,44 @@ class MultiContainerManager:
         self.managers: Dict[str, ContainerManager] = {}
         self._tasks: List[asyncio.Task] = []
 
+    def _normalize_root(self) -> None:
+        """
+        Normalize config so that global `acs` is shared and per-container `acs`
+        only keeps overrides (e.g., container_name / service_type).
+        Also removes legacy `id` in favor of `name` as unique key.
+        """
+        try:
+            root = self.base_store.read(reload=True)
+            containers = root.get("containers") or []
+            base_acs = root.get("acs", {}) if isinstance(root.get("acs"), dict) else {}
+            normalized: List[Dict[str, Any]] = []
+            for idx, c in enumerate(containers):
+                if not isinstance(c, dict):
+                    continue
+                name = c.get("name") or c.get("id") or f"c{idx+1}"
+                if not name:
+                    continue
+                c_acs = c.get("acs", {}) if isinstance(c.get("acs"), dict) else {}
+                acs_override: Dict[str, Any] = {}
+                # keep container_name/service_type even if same as base
+                for key, val in c_acs.items():
+                    if key == "container_name" or key == "service_type":
+                        acs_override[key] = val
+                        continue
+                    if base_acs.get(key) != val:
+                        acs_override[key] = val
+                normalized.append(
+                    {
+                        "name": name,
+                        "acs": acs_override,
+                        "ssh": c.get("ssh", {}),
+                    }
+                )
+            root["containers"] = normalized
+            self.base_store.write(root)
+        except Exception as exc:
+            logger.warning("Failed to normalize config: %s", exc)
+
     def load_profiles(self) -> List[Dict[str, Any]]:
         root = self.base_store.read(reload=True)
         containers = root.get("containers") or []
@@ -44,6 +82,7 @@ class MultiContainerManager:
         return profiles
 
     def init_managers(self) -> None:
+        self._normalize_root()
         profiles = self.load_profiles()
         root = self.base_store.read(reload=True)
         if not root.get("containers"):
