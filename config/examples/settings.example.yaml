@@ -27,19 +27,27 @@ containers:
       container_port: 22                  # 内层 SSH 端口（double 模式用）
       password_login: false               # true 使用密码；false 使用密钥
       password: ""                        # 密码登录的密码（如启用 password_login）
-      local_open_port: 7890               # 本地默认监听端口
-      container_open_port: 7890           # 容器侧默认监听端口
-      intermediate_port: 17890            # double 模式中间端口
-      forwards: []                        # 额外正向转发列表 (-L)
-      reverse_forwards: []                # 额外反向转发列表 (-R)，double 需带 intermediate
+      forwards: []                        # 正向转发列表 (-L)，元素格式示例：{"local": 8080, "remote": 80}
+      reverse_forwards: []                # 反向转发列表 (-R)，格式：字典或 "本地:容器[:中间端口]"；double 必须包含中间端口
       container_ip: ""                    # 可选兜底 IP；notebook 模式必填，解析到新 IP 会写回
 
 # 可按需继续添加更多容器：
-#  - id: "another"
-#    name: "Another"
+#  - name: "Another"
 #    acs:
 #      container_name: "Another"
-#    ssh: {...}
+#      service_type: "container"
+#    ssh:
+#      mode: "jump"
+#      bastion_host: ""
+#      bastion_user: ""
+#      target_user: "root"
+#      port: 22
+#      container_port: 22
+#      password_login: false
+#      password: ""
+#      forwards: []
+#      reverse_forwards: []
+#      container_ip: ""
 
 webui:
   host: "0.0.0.0"                         # Web UI 绑定地址
