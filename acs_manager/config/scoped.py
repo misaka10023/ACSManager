@@ -36,7 +36,9 @@ class ContainerScopedStore:
         if container is None:
             raise ValueError(f"Container {self.container_id} not found in config")
 
-        base_acs = root.get("acs", {}) if isinstance(root.get("acs"), dict) else {}
+        base_acs_raw = root.get("acs", {}) if isinstance(root.get("acs"), dict) else {}
+        # 不让 container_name / service_type 混入全局
+        base_acs = {k: v for k, v in base_acs_raw.items() if k not in ("container_name", "service_type")}
         container_acs = container.get("acs", {}) if isinstance(container.get("acs"), dict) else {}
         merged_acs = dict(base_acs)
         merged_acs.update(container_acs)

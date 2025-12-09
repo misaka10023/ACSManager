@@ -22,14 +22,19 @@ class MultiContainerManager:
 
     def _normalize_root(self) -> None:
         """
-        Normalize config so that global `acs` is shared and per-container `acs`
-        only keeps overrides (e.g., container_name / service_type).
-        Also removes legacy `id` in favor of `name` as unique key.
+        Normalize config:
+        - Global `acs` is shared; remove service_type from global.
+        - Each container keeps only `acs.container_name` and `acs.service_type` (explicit), drops legacy id.
+        - Migrate ssh.remote_server_ip -> ssh.bastion_host.
         """
         try:
             root = self.base_store.read(reload=True)
             containers = root.get("containers") or []
             base_acs = root.get("acs", {}) if isinstance(root.get("acs"), dict) else {}
+            if "service_type" in base_acs:
+                base_acs = dict(base_acs)
+                base_acs.pop("service_type", None)
+            root["acs"] = base_acs
             normalized: List[Dict[str, Any]] = []
             for idx, c in enumerate(containers):
                 if not isinstance(c, dict):
@@ -37,20 +42,23 @@ class MultiContainerManager:
                 name = c.get("name") or c.get("id") or f"c{idx+1}"
                 if not name:
                     continue
-                c_acs = c.get("acs", {}) if isinstance(c.get("acs"), dict) else {}
-                acs_override: Dict[str, Any] = {}
-                # keep container_name/service_type even if same as base
-                for key, val in c_acs.items():
-                    if key == "container_name" or key == "service_type":
-                        acs_override[key] = val
-                        continue
-                    if base_acs.get(key) != val:
-                        acs_override[key] = val
+                c_acs_raw = c.get("acs", {}) if isinstance(c.get("acs"), dict) else {}
+                container_name = c_acs_raw.get("container_name") or name
+                service_type = c_acs_raw.get("service_type") or "container"
+                acs_override: Dict[str, Any] = {
+                    "container_name": container_name,
+                    "service_type": service_type,
+                }
+                ssh_raw = c.get("ssh", {}) if isinstance(c.get("ssh"), dict) else {}
+                ssh_clean = dict(ssh_raw)
+                if not ssh_clean.get("bastion_host") and ssh_clean.get("remote_server_ip"):
+                    ssh_clean["bastion_host"] = ssh_clean.get("remote_server_ip")
+                ssh_clean.pop("remote_server_ip", None)
                 normalized.append(
                     {
                         "name": name,
                         "acs": acs_override,
-                        "ssh": c.get("ssh", {}),
+                        "ssh": ssh_clean,
                     }
                 )
             root["containers"] = normalized

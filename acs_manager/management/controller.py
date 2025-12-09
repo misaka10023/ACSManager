@@ -299,7 +299,7 @@ class ContainerManager:
 
         mode = (ssh_cfg.get("mode") or "jump").lower()
         target_user = ssh_cfg.get("target_user", "root")
-        bastion_host = ssh_cfg.get("bastion_host") or ssh_cfg.get("remote_server_ip")
+        bastion_host = ssh_cfg.get("bastion_host")
         bastion_user = ssh_cfg.get("bastion_user") or target_user
         ssh_port = ssh_cfg.get("port")
         password_login = ssh_cfg.get("password_login")
@@ -372,7 +372,7 @@ class ContainerManager:
                 if not bastion_host:
                     raise ValueError("jump mode requires ssh.bastion_host or ssh.remote_server_ip")
                 cmd.extend(["-J", f"{bastion_user}@{bastion_host}"])
-            add_forwards(cmd, default_remote=False)
+            add_forwards(cmd, default_remote=True)
             cmd.append(f"{target_user}@{target_ip}")
 
         if password_login and password:
