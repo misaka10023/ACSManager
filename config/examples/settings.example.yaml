@@ -6,6 +6,7 @@ containers:
     acs:
       base_url: "http://192.168.10.200:6080"
       api_prefix: "/sothisai"
+      service_type: "container"    # container | notebook；notebook 仅支持 detail，无法获取 IP，需配置 ssh.container_ip
       login_user: "your-acs-username"
       login_password: "change-me"
       user_type: "os"
@@ -30,7 +31,7 @@ containers:
       intermediate_port: 17890
       forwards: []
       reverse_forwards: []
-      container_ip: ""        # optional fallback; updated when a new IP is discovered
+      container_ip: ""        # optional fallback; updated when a new IP is discovered（notebook 模式必填）
 
 # Add more containers as needed
 #  - id: "another"

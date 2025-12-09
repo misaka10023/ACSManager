@@ -303,6 +303,8 @@ class ContainerClient:
         service_id = task.get("instanceServiceId") or task.get("id")
         if not service_id:
             return None
+        acs_cfg = self._acs_cfg(reload=False)
+        service_type = (acs_cfg.get("service_type") or "container").lower()
 
         monitor = self.get_container_monitor(service_id)
         info: Optional[Dict[str, Any]] = None
@@ -316,25 +318,26 @@ class ContainerClient:
 
         # 尝试使用 related-tasks 中最新的一条记录来确定开始时间/超时时间等
         latest_task: Optional[Dict[str, Any]] = None
-        try:
-            related = self.get_related_tasks(service_id, start=0, limit=20, sort="DESC")
-            items = related.get("data") or []
-            if items:
-                def _parse_time(item: Dict[str, Any]) -> dt.datetime:
-                    for k in ("startTime", "createTime"):
-                        v = item.get(k)
-                        if not v:
-                            continue
-                        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
-                            try:
-                                return dt.datetime.strptime(str(v), fmt)
-                            except ValueError:
+        if service_type != "notebook":
+            try:
+                related = self.get_related_tasks(service_id, start=0, limit=20, sort="DESC")
+                items = related.get("data") or []
+                if items:
+                    def _parse_time(item: Dict[str, Any]) -> dt.datetime:
+                        for k in ("startTime", "createTime"):
+                            v = item.get(k)
+                            if not v:
                                 continue
-                    return dt.datetime.min
+                            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
+                                try:
+                                    return dt.datetime.strptime(str(v), fmt)
+                                except ValueError:
+                                    continue
+                        return dt.datetime.min
 
-                latest_task = max(items, key=_parse_time)
-        except Exception:
-            latest_task = None
+                    latest_task = max(items, key=_parse_time)
+            except Exception:
+                latest_task = None
 
         if latest_task is None:
             try:
@@ -367,13 +370,13 @@ class ContainerClient:
         if source_task.get("remainingTime"):
             info["remainingTime"] = source_task.get("remainingTime")
 
-        # IP：related-tasks/任务列表中如有，优先用；否则查询 run-ips
+        # IP：related-tasks/任务列表中如有，优先用；notebook 模式不调用 run-ips，只尝试 detail/字段；否则 run-ips 兜底
         if not info.get("instanceIp"):
             if source_task.get("instanceIp"):
                 info["instanceIp"] = source_task.get("instanceIp")
             elif source_task.get("headerNotebookIp"):
                 info["instanceIp"] = source_task.get("headerNotebookIp")
-            else:
+            elif service_type != "notebook":
                 run_ips = self.get_run_ips(service_id)
                 ips = run_ips.get("data") or []
                 if ips:

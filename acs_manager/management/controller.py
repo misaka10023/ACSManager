@@ -92,6 +92,19 @@ class ContainerManager:
         if not name:
             logger.warning("acs.container_name not configured; cannot auto-resolve IP.")
             return None
+        acs_cfg = self._acs_cfg(reload=False)
+        service_type = (acs_cfg.get("service_type") or "container").lower()
+        ssh_cfg = self._ssh_cfg(reload=False)
+        if service_type == "notebook":
+            # notebook 模式只能依赖配置中的 container_ip
+            ip_cfg = ssh_cfg.get("container_ip") if isinstance(ssh_cfg, dict) else None
+            if ip_cfg:
+                self.state["container_ip"] = ip_cfg
+                self.state["last_seen"] = dt.datetime.now()
+                logger.info("Using configured container_ip for notebook mode: %s", ip_cfg)
+                return ip_cfg
+            logger.warning("Notebook mode requires ssh.container_ip configured; cannot resolve via API.")
+            return None
         if force_login:
             try:
                 self.container_client.login()
