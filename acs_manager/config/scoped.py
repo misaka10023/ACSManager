@@ -35,7 +35,16 @@ class ContainerScopedStore:
         container = self._find_container(root)
         if container is None:
             raise ValueError(f"Container {self.container_id} not found in config")
-        return dict(container)
+
+        base_acs = root.get("acs", {}) if isinstance(root.get("acs"), dict) else {}
+        container_acs = container.get("acs", {}) if isinstance(container.get("acs"), dict) else {}
+        merged_acs = dict(base_acs)
+        merged_acs.update(container_acs)
+
+        merged = dict(container)
+        merged["acs"] = merged_acs
+        merged["ssh"] = container.get("ssh", {})
+        return merged
 
     def get_section(
         self,

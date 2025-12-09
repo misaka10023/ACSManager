@@ -1,21 +1,25 @@
-# ACS Manager multi-container example (Chinese comments removed for brevity)
+# ACS Manager multi-container example
+
+# Global ACS settings (shared by all containers unless overridden in container.acs)
+acs:
+  base_url: "http://192.168.10.200:6080"
+  api_prefix: "/sothisai"
+  service_type: "container"    # container | notebook (notebook only uses detail API and cannot fetch IP)
+  login_user: "your-acs-username"
+  login_password: "change-me"
+  user_type: "os"
+  public_key: ""
+  verify_ssl: false
+  cookies:
+    JSESSIONID: ""
+    GV_JSESSIONID: ""
 
 containers:
   - id: "e2srlf"
     name: "E2SRLF"
     acs:
-      base_url: "http://192.168.10.200:6080"
-      api_prefix: "/sothisai"
-      service_type: "container"    # container | notebook；notebook 仅支持 detail，无法获取 IP，需配置 ssh.container_ip
-      login_user: "your-acs-username"
-      login_password: "change-me"
-      user_type: "os"
-      public_key: ""
-      verify_ssl: false
-      cookies:
-        JSESSIONID: ""
-        GV_JSESSIONID: ""
-      container_name: "E2SRLF"
+      container_name: "E2SRLF"   # per-container task/container name
+      # service_type: "container" # optional override per container
     ssh:
       mode: "jump"            # direct | jump | double
       remote_server_ip: ""
@@ -31,12 +35,12 @@ containers:
       intermediate_port: 17890
       forwards: []
       reverse_forwards: []
-      container_ip: ""        # optional fallback; updated when a new IP is discovered（notebook 模式必填）
-
+      container_ip: ""        # optional fallback; updated when a new IP is discovered (required for notebook mode)
 # Add more containers as needed
 #  - id: "another"
 #    name: "Another"
-#    acs: {...}
+#    acs:
+#      container_name: "Another"
 #    ssh: {...}
 
 webui:
