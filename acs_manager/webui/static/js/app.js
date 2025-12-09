@@ -23,71 +23,64 @@
     return res.json();
   }
 
-  // ---------- Dashboard ----------
-  async function loadHealth() {
-    const el = document.getElementById('health-status');
-    if (!el) return;
+  // ---------- Dashboard (multi-container) ----------
+  function renderContainers(containers) {
+    const listEl = document.getElementById('containers-list');
+    if (!listEl) return;
+    if (!containers || !containers.length) {
+      listEl.innerHTML = '<div class="text-slate-500 text-sm">No containers configured.</div>';
+      return;
+    }
+    const html = containers
+      .map((c) => {
+        const name = c.name || c.id || 'unknown';
+        const ip = c.container_ip || 'unknown';
+        const status = c.container_status || 'unknown';
+        const tunnel = c.tunnel_status || 'stopped';
+        const lastSeen = c.last_seen || '';
+        return `
+          <div class="p-3 border rounded bg-white shadow-sm">
+            <div class="flex items-center justify-between">
+              <div class="font-semibold">${name}</div>
+              <div class="text-xs text-slate-500">Tunnel: ${tunnel}</div>
+            </div>
+            <div class="mt-1 text-xs text-slate-600">Status: ${status}</div>
+            <div class="mt-1 text-xs text-slate-600">IP: <span class="font-mono">${ip}</span></div>
+            ${lastSeen ? `<div class="mt-1 text-xs text-slate-500">Last seen: ${lastSeen}</div>` : ''}
+            <div class="mt-2 flex gap-2 flex-wrap">
+              <button class="btn btn-primary btn-xxs" data-action="refresh" data-id="${c.id}">Refresh IP</button>
+              <button class="btn btn-primary btn-xxs" data-action="restart" data-id="${c.id}">Restart Tunnel</button>
+              <button class="btn btn-secondary btn-xxs" data-action="start" data-id="${c.id}">Start Tunnel</button>
+              <button class="btn btn-secondary btn-xxs" data-action="stop" data-id="${c.id}">Stop Tunnel</button>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+    listEl.innerHTML = html;
+  }
+
+  async function loadContainers() {
     try {
-      const data = await fetchJSON('/health');
-      const ok = (data.status || '').toLowerCase() === 'ok';
-      el.innerHTML = ok
-        ? '<span class="text-green-600 font-semibold">OK</span>'
-        : '<span class="text-red-600 font-semibold">DOWN</span>';
+      const data = await fetchJSON('/containers');
+      renderContainers(data);
     } catch (e) {
-      el.textContent = String(e);
+      renderContainers([]);
+      console.error(e);
     }
   }
 
-  async function loadState() {
-    const el = document.getElementById('state-block');
-    const meta = document.getElementById('health-meta');
-    if (!el) return;
-    try {
-      const data = await fetchJSON('/state');
-      el.textContent = JSON.stringify(data, null, 2);
-      if (meta) {
-        const lines = [];
-        if (data.container_start_time) {
-          lines.push(`容器开始时间: ${data.container_start_time}`);
-        }
-        if (data.timeout_limit) {
-          lines.push(`时间限制: ${data.timeout_limit}`);
-        }
-        if (data.remaining_time_str) {
-          lines.push(`剩余时间: ${data.remaining_time_str}`);
-        }
-        if (data.next_shutdown) {
-          lines.push(`预计自动停止时间: ${data.next_shutdown}`);
-        }
-        meta.innerHTML = lines.length
-          ? lines.join('<br/>')
-          : '暂未获取到自动停止/重启时间';
-      }
-    } catch (e) {
-      el.textContent = String(e);
-      if (meta) {
-        meta.textContent = '获取状态失败，无法计算剩余时间';
-      }
-    }
-  }
-
-  async function loadIP() {
-    const valEl = document.getElementById('ip-value');
-    const metaEl = document.getElementById('ip-meta');
-    if (!valEl || !metaEl) return;
-    try {
-      const data = await fetchJSON('/container-ip');
-      const ip = data.ip || data.container_ip || '未知';
-      valEl.textContent = ip;
-      const parts = [`来源: ${data.source || 'unknown'}`];
-      if (data.updated_at) {
-        parts.push(`更新时间: ${data.updated_at}`);
-      }
-      metaEl.textContent = parts.join(' · ');
-    } catch (e) {
-      valEl.textContent = '未获取';
-      metaEl.textContent = String(e);
-    }
+  async function containerAction(id, action) {
+    const urlMap = {
+      refresh: `/containers/${id}/refresh-ip`,
+      restart: `/containers/${id}/restart`,
+      start: `/containers/${id}/start`,
+      stop: `/containers/${id}/stop`,
+    };
+    const url = urlMap[action];
+    if (!url) return;
+    await fetchJSON(url, { method: 'POST' });
+    await loadContainers();
   }
 
   async function loadDashLogs() {
@@ -103,25 +96,38 @@
   }
 
   function initDashboard() {
-    loadHealth();
-    loadState();
-    loadIP();
+    loadContainers();
     loadDashLogs();
 
-    const btn = document.getElementById('dash-refresh');
-    if (btn) {
-      btn.addEventListener('click', () => {
-        loadHealth();
-        loadState();
-        loadIP();
-        loadDashLogs();
+    const refreshBtn = document.getElementById('dash-refresh');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', () => {
+        loadContainers();
+      });
+    }
+    const refreshLogsBtn = document.getElementById('dash-refresh-logs');
+    if (refreshLogsBtn) {
+      refreshLogsBtn.addEventListener('click', loadDashLogs);
+    }
+
+    const listEl = document.getElementById('containers-list');
+    if (listEl) {
+      listEl.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('[data-action]');
+        if (!btn) return;
+        const id = btn.getAttribute('data-id');
+        const action = btn.getAttribute('data-action');
+        if (id && action) {
+          containerAction(id, action).catch((err) => {
+            console.error(err);
+            alert(`Action failed: ${err}`);
+          });
+        }
       });
     }
 
     setInterval(() => {
-      loadHealth();
-      loadState();
-      loadIP();
+      loadContainers();
     }, 5000);
   }
 

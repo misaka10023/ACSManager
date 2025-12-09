@@ -21,10 +21,21 @@ logger = logging.getLogger(__name__)
 class ContainerManager:
     """处理 ACS 容器生命周期、IP 跟踪与 SSH 隧道维护。"""
 
-    def __init__(self, store: ConfigStore, container_client: Optional[ContainerClient] = None) -> None:
+    def __init__(
+        self,
+        store: ConfigStore,
+        container_client: Optional[ContainerClient] = None,
+        *,
+        container_id: str = "default",
+        display_name: Optional[str] = None,
+    ) -> None:
         self.store = store
+        self.container_id = container_id
+        self.display_name = display_name or container_id
         self.container_client = container_client or ContainerClient(store)
         self.state: Dict[str, Any] = {
+            "id": self.container_id,
+            "name": self.display_name,
             "container_ip": None,
             "next_shutdown": None,
             "remaining_seconds": None,
@@ -53,6 +64,15 @@ class ContainerManager:
             return
 
         self.state["container_ip"] = ip
+        # Persist latest IP to config for this container (ssh.container_ip)
+        try:
+            ssh_cfg = self._ssh_cfg(reload=False)
+            if isinstance(ssh_cfg, dict):
+                updated_ssh = dict(ssh_cfg)
+                updated_ssh["container_ip"] = ip
+                self.store.update({"ssh": updated_ssh})
+        except Exception as exc:
+            logger.warning("Failed to persist container_ip to config: %s", exc)
 
         if not self._tunnel_started_once:
             logger.info("Captured container IP for the first time: %s; waiting for tunnel init.", ip)

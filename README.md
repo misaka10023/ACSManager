@@ -13,11 +13,14 @@
 
 ## 功能一览
 
+- **多容器支持**
+  - `containers` 列表为每个容器提供独立的 ACS/SSH 配置（端口、登录方式、转发规则、fallback IP 等）。
+  - 后台为每个容器维护独立的生命周期监控与 SSH 隧道；仪表盘可列出全部容器并执行刷新 IP / 启停/重启隧道。
 - **ACS API 客户端 (`acs_manager.container.client.ContainerClient`)**
   - 使用配置中的 Base64 公钥对密码做 RSA 加密，调用 `/login/loginAuth.action` 登录 ACS。
   - 支持配置中直接复用 `JSESSIONID` / `GV_JSESSIONID`（`acs.cookies` 不为空时跳过登录）。
   - 调用 `/sothisai/api/instance-service/task`、`/sothisai/api/instance-service/related-tasks`、`/sothisai/api/instance/{id}/container-monitor`、`/sothisai/api/instance-service/{id}/run-ips` 查询任务列表、容器状态和 IP；当 related-tasks 不返回数据时会尝试 `/sothisai/api/instance-service/{id}/detail` 作为兜底获取最新记录/IP 线索。
-  - 登录成功后会自动把最新 cookies 写回配置文件（`acs.cookies`），方便后续复用。
+  - 登录成功后会自动把最新 cookies 写回配置文件（`acs.cookies`），方便后续复用；解析到新 IP 时会写回对应容器的 `ssh.container_ip` 作为下次的兜底。
 
 - **容器生命周期 + SSH 隧道管理 (`acs_manager.management.controller.ContainerManager`)**
   - 根据 `acs.container_name` 查找 ACS 任务，使用 restart API 在容器停止时自动重启。
@@ -266,6 +269,12 @@ curl -X PATCH http://localhost:8000/config \
 
 这里只列关键字段，更详细的中文注释见示例文件本身。
 
+### 多容器配置
+
+- 推荐使用 `containers` 列表，每个元素包含独立的 `acs` 与 `ssh` 段（参见 `config/examples/settings.example.yaml`）。
+- 每个容器都可以配置自己的端口、转发、登录方式、fallback `ssh.container_ip`；发现新 IP 时会写回对应容器的 `ssh.container_ip` 便于下次直连。
+- 若老配置仍是单一 `acs`/`ssh` 段，会自动视为一个容器。
+
 ### `acs` 段
 
 - `base_url`：ACS 控制台基础地址（含协议+端口）。
@@ -273,7 +282,7 @@ curl -X PATCH http://localhost:8000/config \
 - `login_user` / `login_password` / `user_type` / `public_key`：登录相关。
 - `verify_ssl`：自签名证书时可设为 `false`。
 - `cookies`：预置 cookies；自动登录成功后会被最新值覆盖。
-- `container_name`：容器/任务名称，例如 `E2SRLF`。请在“容器服务”界面创建容器，其他入口创建的实例通过上述 API 通常无法查询到容器 IP。
+- `container_name`：容器/任务名称，例如 `Instances_2511296089`。请在“容器服务”界面创建容器，其他入口创建的实例通过上述 API 通常无法查询到容器 IP。
 
 ### `ssh` 段
 

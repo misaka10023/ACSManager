@@ -1,52 +1,54 @@
-# ACS 管理器配置示例（所有字段均含中文说明）
+# ACS Manager multi-container example (Chinese comments removed for brevity)
 
-acs:
-  base_url: "http://192.168.10.200:6080"   # ACS 控制台基础地址；默认使用 http:6080，若启用 https 请自行调整
-  api_prefix: "/sothisai"                  # API 前缀，最终拼出 /sothisai/api/...
-  login_user: "your-acs-username"          # 登录用户名
-  login_password: "change-me"              # 登录密码
-  user_type: "os"                          # 登录用户类型（前端下拉：os/gridview 等）
-  public_key: ""                           # 登录密码加密公钥（Base64）
-  verify_ssl: false                        # 如为自签名证书可设为 false
-  cookies:                                 # 预置 JSESSIONID / GV_JSESSIONID（可选；为空则自动登录获取）
-    JSESSIONID: ""
-    GV_JSESSIONID: ""
-  container_name: "abc"                    # 登录后列表显示的容器/任务名称
+containers:
+  - id: "e2srlf"
+    name: "E2SRLF"
+    acs:
+      base_url: "http://192.168.10.200:6080"
+      api_prefix: "/sothisai"
+      login_user: "your-acs-username"
+      login_password: "change-me"
+      user_type: "os"
+      public_key: ""
+      verify_ssl: false
+      cookies:
+        JSESSIONID: ""
+        GV_JSESSIONID: ""
+      container_name: "E2SRLF"
+    ssh:
+      mode: "jump"            # direct | jump | double
+      remote_server_ip: ""
+      bastion_host: ""
+      bastion_user: ""
+      target_user: "root"
+      port: 22
+      container_port: 22
+      password_login: false
+      password: ""
+      local_open_port: 7890
+      container_open_port: 7890
+      intermediate_port: 17890
+      forwards: []
+      reverse_forwards: []
+      container_ip: ""        # optional fallback; updated when a new IP is discovered
 
-ssh:
-  mode: "jump"                             # ssh 模式：direct(直连容器) | jump(-J 跳板) | double(双层 ssh)
-  remote_server_ip: ""                     # 跳板机/远程服务器 IP（direct 模式可留空）
-  bastion_host: ""                         # -J 使用的跳板主机（direct 模式可留空）
-  bastion_user: ""                         # 跳板登录用户（direct 模式可留空）
-  target_user: "root"                      # 容器主机登录用户
-  port: 22                                 # 默认 ssh 端口（外层/单层）
-  container_port: 22                       # 双层 ssh 内层端口；不填则沿用 port
-  password_login: false                    # true 使用密码登录；false 使用密钥
-  password: ""                             # 密码登录密码（生产环境请替换）
-  local_open_port: 7890                    # 本地端口（本地代理软件监听）
-  container_open_port: 7890                # 容器内监听端口
-  intermediate_port: 17890                 # 双层 ssh 反向转发中间端口（跳板上临时端口）
-#  forwards:                                # 额外正向转发列表 (-L)，remote 为远端端口
-#    - local: 7891
-#      remote: 7892
-#    - local: 8022
-#      remote: 22
-#  reverse_forwards:                        # 额外反向转发列表；double 模式需要提供 intermediate
-#    - local: 9000                          # 本地端口
-#      remote: 9000                         # 远端监听端口（容器侧）
-#      intermediate: 19000                  # 跳板中间端口，不填则使用 intermediate_port
+# Add more containers as needed
+#  - id: "another"
+#    name: "Another"
+#    acs: {...}
+#    ssh: {...}
 
 webui:
-  host: "0.0.0.0"                          # Web UI 绑定地址
-  port: 8000                               # Web UI 端口
-  root_path: ""                            # 可选：部署到子路径（如 /acsmanager）时填入前缀
-  auth:                                    # 简单用户名/密码登录（可选）
-    enabled: false                         # 设为 true 开启登录
-    username: "admin"                      # 登录用户名
-    password: "change-me"                  # 明文密码（推荐改用 password_hash）
-    # password_hash: ""                    # 可选，填入明文密码的 sha256；同时清空 password
-    secret_key: "change-me-please"         # 用于签名会话 cookie
-    session_ttl: 43200                     # 会话有效期（秒），默认 12 小时
+  host: "0.0.0.0"
+  port: 8000
+  root_path: ""
+  auth:
+    enabled: false
+    username: "admin"
+    password: "change-me"
+    password_hash: ""
+    secret_key: "change-me-please"
+    session_ttl: 43200
 
 logging:
-  level: INFO                              # 日志级别 (DEBUG/INFO/WARNING/ERROR)
+  level: INFO

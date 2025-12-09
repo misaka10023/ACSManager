@@ -7,13 +7,13 @@ import datetime as dt
 import logging
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List
 
 import uvicorn
 
 from acs_manager.capture.sniffer import PacketSniffer
 from acs_manager.config import ConfigStore
-from acs_manager.management.controller import ContainerManager
+from acs_manager.management.multi_manager import MultiContainerManager
 from acs_manager.webui import app as web_app
 
 DEFAULT_CONFIG = "config/local/settings.yaml"
@@ -73,49 +73,39 @@ async def run(config_path: str, log_level: str) -> None:
         logging.error("已生成配置文件 %s，请填写配置后重新运行。", cfg_path)
         return
     store = ConfigStore(cfg_path)
-    manager = ContainerManager(store)
-    web_app.bind_manager(manager)
+    multi_manager = MultiContainerManager(store)
+    multi_manager.init_managers()
+    web_app.bind_multi_manager(multi_manager)
     web_app.bind_config_store(store)
-
-    async def on_new_ip(ip: str) -> None:
-        await manager.handle_new_ip(ip)
-
-    acs_cfg = store.get_section("acs", default={}, reload=True)
-    sniffer = PacketSniffer(
-        target_url=acs_cfg.get("base_url", ""),
-        on_new_ip=lambda ip: asyncio.create_task(on_new_ip(ip)),
-    )
 
     web_cfg = store.get_section("webui", default={}, reload=True)
     web_app.set_root_path(web_cfg.get("root_path", ""))
 
-    # 先启动 WebUI 与抓包，让界面可用
-    sniffer_task = asyncio.create_task(sniffer.start())
     web_task = asyncio.create_task(start_web_ui(web_cfg))
+    background_tasks = await multi_manager.start_background_tasks()
 
-    # 启动流程中：先登录并检查容器状态（Waiting/Running/Stopped）
-    if acs_cfg.get("container_name"):
-        await manager.prepare_on_start()
+    sniffer_tasks = []
+    for m in multi_manager.managers.values():
+        try:
+            acs_cfg = m._acs_cfg(reload=True)  # type: ignore[attr-defined]
+            target_url = acs_cfg.get("base_url", "")
+            if target_url:
+                sniffer = PacketSniffer(
+                    target_url=target_url,
+                    on_new_ip=lambda ip, mgr=m: asyncio.create_task(mgr.handle_new_ip(ip)),
+                )
+                sniffer_tasks.append(asyncio.create_task(sniffer.start()))
+        except Exception as exc:
+            logging.warning("Failed to start sniffer for %s: %s", getattr(m, "container_id", "unknown"), exc)
 
-    tasks = [
-        sniffer_task,
-        web_task,
-        asyncio.create_task(manager.maintain_tunnel()),
-    ]
-    # 监控容器生命周期（预估停止时间、自动重启等）
-    if acs_cfg.get("container_name"):
-        tasks.append(
-            asyncio.create_task(
-                manager.monitor_container(pre_shutdown_minutes=10, slow_interval=300, fast_interval=30)
-            )
-        )
+    tasks = sniffer_tasks + [web_task] + background_tasks
     logging.info("ACS Manager running. Press Ctrl+C to exit.")
     try:
         await asyncio.gather(*tasks)
     except asyncio.CancelledError:
         logging.info("Shutdown requested.")
     finally:
-        await manager.shutdown()
+        await multi_manager.shutdown()
 
 
 def parse_args() -> argparse.Namespace:

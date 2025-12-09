@@ -17,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 
 from acs_manager.config.store import ConfigStore
 from acs_manager.management.controller import ContainerManager
+from acs_manager.management.multi_manager import MultiContainerManager
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,7 @@ async def log_404(request: Request, exc: HTTPException) -> JSONResponse:
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 manager: Optional[ContainerManager] = None
+multi_manager: Optional[MultiContainerManager] = None
 config_store: Optional[ConfigStore] = None
 LOG_DIR = Path("logs")
 _root_path_middleware_added = False
@@ -96,9 +98,25 @@ def bind_manager(instance: ContainerManager) -> None:
     manager = instance
 
 
+def bind_multi_manager(instance: MultiContainerManager) -> None:
+    global multi_manager
+    multi_manager = instance
+
+
 def bind_config_store(store: ConfigStore) -> None:
     global config_store
     config_store = store
+
+
+def _resolve_manager(container_id: Optional[str] = None) -> Optional[ContainerManager]:
+    if multi_manager:
+        if container_id:
+            return multi_manager.get_manager(container_id)
+        # default: first manager
+        for mgr in multi_manager.managers.values():  # type: ignore[attr-defined]
+            return mgr
+        return None
+    return manager
 
 
 def set_root_path(root_path: str | None) -> None:
@@ -232,21 +250,35 @@ async def static_files(path: str, request: Request) -> Response:
 
 
 @app.get("/state")
-def state(user: str = Depends(require_auth)) -> dict:
-    if manager is None:
+def state(
+    container_id: Optional[str] = Query(None),
+    user: str = Depends(require_auth),
+) -> dict:
+    mgr = _resolve_manager(container_id)
+    if mgr is None:
         raise HTTPException(status_code=503, detail="Manager not wired to web UI yet")
-    return manager.snapshot()
+    return mgr.snapshot()
+
+
+@app.get("/containers")
+def list_containers(user: str = Depends(require_auth)) -> list[dict]:
+    if multi_manager:
+        return multi_manager.list_states()
+    if manager:
+        return [manager.snapshot()]
+    raise HTTPException(status_code=503, detail="Manager not wired to web UI yet")
 
 
 @app.get("/container-ip")
-def container_ip() -> dict:
-    if manager is None:
+def container_ip(container_id: Optional[str] = Query(None)) -> dict:
+    mgr = _resolve_manager(container_id)
+    if mgr is None:
         raise HTTPException(status_code=503, detail="Manager not wired to web UI yet")
-    ip = manager.snapshot().get("container_ip")
+    ip = mgr.snapshot().get("container_ip")
     source = "captured"
     if not ip:
         try:
-            ip = manager.resolve_container_ip(force_login=True)
+            ip = mgr.resolve_container_ip(force_login=True)
             source = "api"
         except Exception:
             ip = None
@@ -266,11 +298,47 @@ def container_ip() -> dict:
         "ip": ip,
         "source": source,
     }
-    if manager and manager.snapshot().get("last_seen"):
-        seen = manager.snapshot().get("last_seen")
+    if mgr and mgr.snapshot().get("last_seen"):
+        seen = mgr.snapshot().get("last_seen")
         if isinstance(seen, dt.datetime):
             payload["updated_at"] = seen.strftime("%Y-%m-%d %H:%M:%S")
     return payload
+
+
+@app.post("/containers/{container_id}/restart")
+async def restart_tunnel(container_id: str, user: str = Depends(require_auth)) -> dict:
+    mgr = _resolve_manager(container_id)
+    if mgr is None:
+        raise HTTPException(status_code=404, detail="Container not found")
+    await mgr.restart_tunnel()
+    return {"status": "restarted"}
+
+
+@app.post("/containers/{container_id}/start")
+async def start_tunnel(container_id: str, user: str = Depends(require_auth)) -> dict:
+    mgr = _resolve_manager(container_id)
+    if mgr is None:
+        raise HTTPException(status_code=404, detail="Container not found")
+    await mgr.start_tunnel()
+    return {"status": "started"}
+
+
+@app.post("/containers/{container_id}/stop")
+async def stop_tunnel(container_id: str, user: str = Depends(require_auth)) -> dict:
+    mgr = _resolve_manager(container_id)
+    if mgr is None:
+        raise HTTPException(status_code=404, detail="Container not found")
+    await mgr.stop_tunnel()
+    return {"status": "stopped"}
+
+
+@app.post("/containers/{container_id}/refresh-ip")
+def refresh_ip(container_id: str, user: str = Depends(require_auth)) -> dict:
+    mgr = _resolve_manager(container_id)
+    if mgr is None:
+        raise HTTPException(status_code=404, detail="Container not found")
+    ip = mgr.resolve_container_ip(force_login=True)
+    return {"ip": ip, "container_ip": ip}
 
 
 @app.get("/config")
@@ -305,8 +373,21 @@ def _critical_snapshot(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def _post_config_change(old_cfg: Dict[str, Any], new_cfg: Dict[str, Any]) -> None:
-    """关键配置变更后：重新登录刷新 cookies，并必要时重启 SSH 隧道。"""
-    if manager is None:
+    """Handle config changes: restart tunnels (all containers when multi)."""
+    targets: list[ContainerManager] = []
+    if multi_manager:
+        targets = list(multi_manager.managers.values())
+    elif manager:
+        targets = [manager]
+    else:
+        return
+
+    if "containers" in new_cfg:
+        for mgr in targets:
+            try:
+                await mgr.restart_tunnel()
+            except Exception as exc:
+                logger.error("Failed to restart tunnel (%s): %s", getattr(mgr, "container_id", "unknown"), exc)
         return
 
     before = _critical_snapshot(old_cfg)
@@ -319,18 +400,20 @@ async def _post_config_change(old_cfg: Dict[str, Any], new_cfg: Dict[str, Any]) 
     ssh_changed = any(before[k] != after[k] for k in ssh_keys)
 
     if acs_changed:
-        try:
-            logger.info("检测到 ACS 关键配置变更，尝试重新登录以刷新 cookies。")
-            manager.container_client.login()  # type: ignore[attr-defined]
-        except Exception as exc:  # pragma: no cover - 网络/ACS 异常
-            logger.error("重新登录以刷新 ACS cookies 失败: %s", exc)
+        for mgr in targets:
+            try:
+                logger.info("ACS config changed; re-login to refresh cookies.")
+                mgr.container_client.login()  # type: ignore[attr-defined]
+            except Exception as exc:  # pragma: no cover
+                logger.error("Failed to refresh ACS cookies (%s): %s", getattr(mgr, "container_id", "unknown"), exc)
 
     if ssh_changed:
-        try:
-            logger.info("检测到 SSH 关键配置变更，重启隧道以应用新配置。")
-            await manager.restart_tunnel()
-        except Exception as exc:  # pragma: no cover - 隧道异常
-            logger.error("重启 SSH 隧道失败: %s", exc)
+        for mgr in targets:
+            try:
+                logger.info("SSH config changed; restarting tunnel.")
+                await mgr.restart_tunnel()
+            except Exception as exc:  # pragma: no cover
+                logger.error("Failed to restart SSH tunnel (%s): %s", getattr(mgr, "container_id", "unknown"), exc)
 
 
 @app.patch("/config")
