@@ -1,42 +1,43 @@
-# ACS Manager multi-container example
+# ACS Manager 多容器配置示例（含中文注释）
 
-# Global ACS settings (shared by all containers unless overridden in container.acs)
+# 全局 ACS 配置：所有容器共享，可在容器级覆盖 acs 字段
 acs:
-  base_url: "http://192.168.10.200:6080"
-  api_prefix: "/sothisai"
-  service_type: "container"    # container | notebook (notebook only uses detail API and cannot fetch IP)
-  login_user: "your-acs-username"
-  login_password: "change-me"
-  user_type: "os"
-  public_key: ""
-  verify_ssl: false
-  cookies:
+  base_url: "http://192.168.10.200:6080"  # ACS 控制台基础地址（含协议和端口）
+  api_prefix: "/sothisai"                 # ACS API 前缀，默认 /sothisai
+  service_type: "container"               # container | notebook；notebook 仅用 detail 接口且无法自动解析 IP
+  login_user: "your-acs-username"         # ACS 登录用户名
+  login_password: "change-me"             # ACS 登录密码（生产请修改）
+  user_type: "os"                         # 登录用户类型（如 os/gridview）
+  public_key: ""                          # 登录密码加密用的 Base64 公钥
+  verify_ssl: false                       # 自签证书可设为 false 关闭校验
+  cookies:                                # 预置 cookies；非空时跳过登录
     JSESSIONID: ""
     GV_JSESSIONID: ""
 
 containers:
-  - id: "e2srlf"
-    name: "E2SRLF"
+  - id: "e2srlf"                          # 容器唯一标识（自定义）
+    name: "E2SRLF"                        # 展示名称
     acs:
-      container_name: "E2SRLF"   # per-container task/container name
-      # service_type: "container" # optional override per container
+      container_name: "E2SRLF"            # 在 ACS 任务列表中的容器/任务名
+      # service_type: "container"         # 可选覆盖，notebook 模式需填写 ssh.container_ip
     ssh:
-      mode: "jump"            # direct | jump | double
-      remote_server_ip: ""
-      bastion_host: ""
-      bastion_user: ""
-      target_user: "root"
-      port: 22
-      container_port: 22
-      password_login: false
-      password: ""
-      local_open_port: 7890
-      container_open_port: 7890
-      intermediate_port: 17890
-      forwards: []
-      reverse_forwards: []
-      container_ip: ""        # optional fallback; updated when a new IP is discovered (required for notebook mode)
-# Add more containers as needed
+      mode: "jump"                        # direct|jump|double SSH 模式
+      remote_server_ip: ""                # 跳板/远程服务器 IP（direct 可空）
+      bastion_host: ""                    # -J 跳板主机（direct 可空）
+      bastion_user: ""                    # 跳板登录用户（direct 可空）
+      target_user: "root"                 # 容器宿主机登录用户
+      port: 22                            # 外层 SSH 端口
+      container_port: 22                  # 内层 SSH 端口（double 模式用）
+      password_login: false               # true 使用密码；false 使用密钥
+      password: ""                        # 密码登录的密码（如启用 password_login）
+      local_open_port: 7890               # 本地默认监听端口
+      container_open_port: 7890           # 容器侧默认监听端口
+      intermediate_port: 17890            # double 模式中间端口
+      forwards: []                        # 额外正向转发列表 (-L)
+      reverse_forwards: []                # 额外反向转发列表 (-R)，double 需带 intermediate
+      container_ip: ""                    # 可选兜底 IP；notebook 模式必填，解析到新 IP 会写回
+
+# 可按需继续添加更多容器：
 #  - id: "another"
 #    name: "Another"
 #    acs:
@@ -44,16 +45,16 @@ containers:
 #    ssh: {...}
 
 webui:
-  host: "0.0.0.0"
-  port: 8000
-  root_path: ""
-  auth:
-    enabled: false
-    username: "admin"
-    password: "change-me"
-    password_hash: ""
-    secret_key: "change-me-please"
-    session_ttl: 43200
+  host: "0.0.0.0"                         # Web UI 绑定地址
+  port: 8000                              # Web UI 端口
+  root_path: ""                           # 部署在子路径时填写前缀（如 /acsmanager）
+  auth:                                   
+    enabled: false                        # 是否启用登录
+    username: "admin"                     # 登录用户名
+    password: "change-me"                 # 明文密码（生产建议改为 password_hash）
+    password_hash: ""                     # 可选：sha256 密码，填写后清空 password
+    secret_key: "change-me-please"        # 签名 session cookie 的密钥
+    session_ttl: 43200                    # 会话有效期（秒）
 
 logging:
-  level: INFO
+  level: INFO                             # 日志级别（DEBUG/INFO/WARNING/ERROR）
