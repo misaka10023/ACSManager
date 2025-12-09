@@ -340,8 +340,8 @@ class ContainerManager:
             if not bastion_host:
                 raise ValueError("double mode requires ssh.bastion_host or ssh.remote_server_ip")
             revs = self._reverse_specs(ssh_cfg)
-            if any(spec.get("mid") is None for spec in revs):
-                raise ValueError("double mode reverse forwarding needs intermediate_port or reverse_forwards.intermediate")
+            if revs and any(spec.get("mid") is None for spec in revs):
+                raise ValueError("double mode reverse forwarding needs mid (intermediate port) in reverse_forwards")
 
             outer: List[str] = ["ssh", "-T"] + keepalive
             add_port(outer, ssh_port)
@@ -364,6 +364,8 @@ class ContainerManager:
                     raise ValueError("jump mode requires ssh.bastion_host or ssh.remote_server_ip")
                 cmd.extend(["-J", f"{bastion_user}@{bastion_host}"])
             add_forwards(cmd)
+            for spec in self._reverse_specs(ssh_cfg):
+                cmd.extend(["-R", f"{spec['remote']}:localhost:{spec['local']}"])
             cmd.append(f"{target_user}@{target_ip}")
 
         if password_login and password:
@@ -541,17 +543,39 @@ done
             )
 
     def _reverse_specs(self, ssh_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """构造反向转发规范，仅使用配置的 reverse_forwards。"""
-        local_open_port = ssh_cfg.get("local_open_port")
-        container_open_port = ssh_cfg.get("container_open_port")
-        intermediate_port = ssh_cfg.get("intermediate_port")
+        """解析反向转发规范：支持字典或 'local:remote[:mid]' 字符串。"""
         revs = ssh_cfg.get("reverse_forwards") or []
         specs: List[Dict[str, Any]] = []
-        for spec in revs:
-            local = spec.get("local")
-            remote = spec.get("remote")
-            mid = spec.get("intermediate") or intermediate_port
-            specs.append({"local": int(local), "remote": int(remote), "mid": int(mid) if mid else None})
+
+        def _parse(item: Any) -> Optional[Dict[str, Any]]:
+            if isinstance(item, str):
+                parts = item.split(":")
+                if len(parts) not in (2, 3):
+                    return None
+                local, remote = parts[0], parts[1]
+                mid = parts[2] if len(parts) == 3 else None
+                return {
+                    "local": int(local),
+                    "remote": int(remote),
+                    "mid": int(mid) if mid else None,
+                }
+            if isinstance(item, dict):
+                local = item.get("local")
+                remote = item.get("remote")
+                mid = item.get("intermediate") or item.get("mid")
+                if local is None or remote is None:
+                    return None
+                return {
+                    "local": int(local),
+                    "remote": int(remote),
+                    "mid": int(mid) if mid else None,
+                }
+            return None
+
+        for item in revs:
+            parsed = _parse(item)
+            if parsed:
+                specs.append(parsed)
         return specs
     async def _ensure_ports_free(self, ports: List[int], retries: int = 3, delay: float = 1.0) -> bool:
         """隧道重连前多次尝试释放端口。"""
