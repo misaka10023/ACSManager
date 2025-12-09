@@ -217,6 +217,11 @@ class ContainerClient:
             },
         )
 
+    def get_instance_detail(self, instance_service_id: str) -> Dict[str, Any]:
+        """获取实例详情：/api/instance-service/{id}/detail。"""
+        url = self._url_api(f"/api/instance-service/{instance_service_id}/detail")
+        return self._request_json("get", url)
+
     def get_run_ips(self, instance_service_id: str) -> Dict[str, Any]:
         """通过 run-ips 获取容器 IP 列表。"""
         url = self._url_api(f"/api/instance-service/{instance_service_id}/run-ips")
@@ -331,6 +336,15 @@ class ContainerClient:
         except Exception:
             latest_task = None
 
+        if latest_task is None:
+            try:
+                detail = self.get_instance_detail(service_id)
+                detail_data = detail.get("data") if isinstance(detail, dict) else None
+                if isinstance(detail_data, dict) and detail_data:
+                    latest_task = detail_data
+            except Exception:
+                latest_task = None
+
         source_task = latest_task or task
 
         # 状态字段
@@ -357,6 +371,8 @@ class ContainerClient:
         if not info.get("instanceIp"):
             if source_task.get("instanceIp"):
                 info["instanceIp"] = source_task.get("instanceIp")
+            elif source_task.get("headerNotebookIp"):
+                info["instanceIp"] = source_task.get("headerNotebookIp")
             else:
                 run_ips = self.get_run_ips(service_id)
                 ips = run_ips.get("data") or []

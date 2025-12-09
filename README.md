@@ -16,7 +16,7 @@
 - **ACS API 客户端 (`acs_manager.container.client.ContainerClient`)**
   - 使用配置中的 Base64 公钥对密码做 RSA 加密，调用 `/login/loginAuth.action` 登录 ACS。
   - 支持配置中直接复用 `JSESSIONID` / `GV_JSESSIONID`（`acs.cookies` 不为空时跳过登录）。
-  - 调用 `/sothisai/api/instance-service/task`、`/sothisai/api/instance/{id}/container-monitor`、`/sothisai/api/instance-service/{id}/run-ips` 查询任务列表、容器状态和 IP。
+  - 调用 `/sothisai/api/instance-service/task`、`/sothisai/api/instance-service/related-tasks`、`/sothisai/api/instance/{id}/container-monitor`、`/sothisai/api/instance-service/{id}/run-ips` 查询任务列表、容器状态和 IP；当 related-tasks 不返回数据时会尝试 `/sothisai/api/instance-service/{id}/detail` 作为兜底获取最新记录/IP 线索。
   - 登录成功后会自动把最新 cookies 写回配置文件（`acs.cookies`），方便后续复用。
 
 - **容器生命周期 + SSH 隧道管理 (`acs_manager.management.controller.ContainerManager`)**
@@ -273,7 +273,7 @@ curl -X PATCH http://localhost:8000/config \
 - `login_user` / `login_password` / `user_type` / `public_key`：登录相关。
 - `verify_ssl`：自签名证书时可设为 `false`。
 - `cookies`：预置 cookies；自动登录成功后会被最新值覆盖。
-- `container_name`：容器/任务名称，例如 `E2SRLF`。
+- `container_name`：容器/任务名称，例如 `E2SRLF`。请在“容器服务”界面创建容器，其他入口创建的实例通过上述 API 通常无法查询到容器 IP。
 
 ### `ssh` 段
 
