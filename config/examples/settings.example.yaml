@@ -21,8 +21,7 @@ containers:
       # service_type: "container"         # 可选覆盖，notebook 模式需填写 ssh.container_ip
     ssh:
       mode: "jump"                        # direct|jump|double SSH 模式
-      remote_server_ip: ""                # 跳板/远程服务器 IP（direct 可空）
-      bastion_host: ""                    # -J 跳板主机（direct 可空）
+      bastion_host: ""                    # 跳板/远程服务器 IP（direct 可空）
       bastion_user: ""                    # 跳板登录用户（direct 可空）
       target_user: "root"                 # 容器宿主机登录用户
       port: 22                            # 外层 SSH 端口

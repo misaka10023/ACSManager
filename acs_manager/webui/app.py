@@ -424,6 +424,12 @@ async def patch_config(payload: dict = Body(..., embed=False), user: str = Depen
         raise HTTPException(status_code=400, detail="Payload must be an object")
     old_cfg = config_store.read(reload=False)
     new_cfg = config_store.update(payload)
+    if multi_manager:
+        try:
+            multi_manager.normalize_root()
+            new_cfg = config_store.read(reload=True)
+        except Exception as exc:
+            logger.warning("Failed to normalize config after patch: %s", exc)
     await _post_config_change(old_cfg, new_cfg)
     return new_cfg
 
@@ -436,6 +442,12 @@ async def replace_config(payload: dict = Body(..., embed=False), user: str = Dep
         raise HTTPException(status_code=400, detail="Payload must be an object")
     old_cfg = config_store.read(reload=False)
     new_cfg = config_store.write(payload)
+    if multi_manager:
+        try:
+            multi_manager.normalize_root()
+            new_cfg = config_store.read(reload=True)
+        except Exception as exc:
+            logger.warning("Failed to normalize config after replace: %s", exc)
     await _post_config_change(old_cfg, new_cfg)
     return new_cfg
 
@@ -569,7 +581,7 @@ def ui_config(request: Request) -> HTMLResponse:
         return redirect
     cfg_text = ""
     template_text = ""
-    example_path = BASE_DIR.parent.parent / "config" / "examples" / "settings.example.yaml"
+    example_path = BASE_DIR.parent.parent / "config" / "examples" / "settings.yaml"
     if config_store:
         try:
             cfg_text = json.dumps(config_store.read(reload=False), indent=2, ensure_ascii=False)
