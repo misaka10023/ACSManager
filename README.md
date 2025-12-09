@@ -271,7 +271,7 @@ curl -X PATCH http://localhost:8000/config \
 
 ### 多容器配置
 
-- 推荐使用 `containers` 列表，每个元素包含独立的 `acs` 与 `ssh` 段（参见 `config/examples/settings.example.yaml`）。
+- 推荐使用 `containers` 列表，每个元素包含独立的 `acs` 与 `ssh` 段（参见 `config/examples/settings.example.yaml`）；容器的 `name` 既是唯一标识也是展示名称。
 - 每个容器都可以配置自己的端口、转发、登录方式、fallback `ssh.container_ip`；发现新 IP 时会写回对应容器的 `ssh.container_ip` 便于下次直连。
 - 若老配置仍是单一 `acs`/`ssh` 段，会自动视为一个容器。
 - `acs.service_type`：`container`（默认）或 `notebook`。`notebook` 仅使用 detail 接口，无法通过 API 解析 IP，必须填好对应容器的 `ssh.container_ip` 才能启隧道。

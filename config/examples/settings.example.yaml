@@ -15,8 +15,7 @@ acs:
     GV_JSESSIONID: ""
 
 containers:
-  - id: "e2srlf"                          # 容器唯一标识（自定义）
-    name: "E2SRLF"                        # 展示名称
+  - name: "E2SRLF"                        # 唯一标识+展示名称（自定义）
     acs:
       container_name: "E2SRLF"            # 在 ACS 任务列表中的容器/任务名
       # service_type: "container"         # 可选覆盖，notebook 模式需填写 ssh.container_ip
