@@ -581,7 +581,7 @@ def ui_config(request: Request) -> HTMLResponse:
         return redirect
     cfg_text = ""
     template_text = ""
-    example_path = BASE_DIR.parent.parent / "config" / "examples" / "settings.yaml"
+    example_path = BASE_DIR.parent.parent / "config" / "examples" / "settings.example.yaml"
     if config_store:
         try:
             cfg_text = json.dumps(config_store.read(reload=False), indent=2, ensure_ascii=False)

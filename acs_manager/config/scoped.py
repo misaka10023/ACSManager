@@ -12,6 +12,18 @@ class ContainerScopedStore:
     settings (`acs`, `ssh`, etc.) as if they were the root-level sections.
     """
 
+    @staticmethod
+    def _compact_container(container: Dict[str, Any], base_acs: Dict[str, Any]) -> Dict[str, Any]:
+        """Keep only name, minimal acs (container_name/service_type), and ssh."""
+        name = container.get("name") or container.get("id")
+        c_acs = container.get("acs", {}) if isinstance(container.get("acs"), dict) else {}
+        compact_acs: Dict[str, Any] = {
+            "container_name": c_acs.get("container_name") or name or base_acs.get("container_name"),
+            "service_type": c_acs.get("service_type") or "container",
+        }
+        ssh = container.get("ssh", {}) if isinstance(container.get("ssh"), dict) else {}
+        return {"name": name, "acs": compact_acs, "ssh": ssh}
+
     def __init__(self, path: str, container_id: str) -> None:
         self.path = path
         self.container_id = str(container_id)
@@ -37,13 +49,13 @@ class ContainerScopedStore:
             raise ValueError(f"Container {self.container_id} not found in config")
 
         base_acs_raw = root.get("acs", {}) if isinstance(root.get("acs"), dict) else {}
-        # 不让 container_name / service_type 混入全局
         base_acs = {k: v for k, v in base_acs_raw.items() if k not in ("container_name", "service_type")}
         container_acs = container.get("acs", {}) if isinstance(container.get("acs"), dict) else {}
         merged_acs = dict(base_acs)
         merged_acs.update(container_acs)
 
         merged = dict(container)
+        merged["name"] = merged.get("name") or merged.get("id")
         merged["acs"] = merged_acs
         merged["ssh"] = container.get("ssh", {})
         return merged
@@ -65,6 +77,8 @@ class ContainerScopedStore:
     def update(self, changes: Dict[str, Any]) -> Dict[str, Any]:
         root = self._read_root(reload=False)
         containers: List[Dict[str, Any]] = root.get("containers") or []
+        base_acs = root.get("acs", {}) if isinstance(root.get("acs"), dict) else {}
+        base_acs = {k: v for k, v in base_acs.items() if k not in ("container_name", "service_type")}
         new_containers: List[Dict[str, Any]] = []
         found = False
         for item in containers:
@@ -72,16 +86,17 @@ class ContainerScopedStore:
             if cid == self.container_id:
                 updated = dict(item)
                 updated.update(changes)
-                if "id" not in updated:
-                    updated["id"] = self.container_id
-                new_containers.append(updated)
+                compact = self._compact_container(updated, base_acs)
+                new_containers.append(compact)
                 found = True
             else:
-                new_containers.append(item)
+                new_containers.append(self._compact_container(item, base_acs))
         if not found:
             updated = dict(changes)
-            updated["id"] = self.container_id
-            new_containers.append(updated)
+            if "name" not in updated:
+                updated["name"] = self.container_id
+            compact = self._compact_container(updated, base_acs)
+            new_containers.append(compact)
         root["containers"] = new_containers
         self._write_root(root)
         return self.read(reload=False)
@@ -89,23 +104,25 @@ class ContainerScopedStore:
     def write(self, data: Dict[str, Any]) -> Dict[str, Any]:
         root = self._read_root(reload=False)
         containers: List[Dict[str, Any]] = root.get("containers") or []
+        base_acs = root.get("acs", {}) if isinstance(root.get("acs"), dict) else {}
+        base_acs = {k: v for k, v in base_acs.items() if k not in ("container_name", "service_type")}
         new_containers: List[Dict[str, Any]] = []
         replaced = False
         for item in containers:
             cid = str(item.get("id") or item.get("name") or "")
             if cid == self.container_id:
                 new_data = dict(data)
-                if "id" not in new_data:
-                    new_data["id"] = self.container_id
-                new_containers.append(new_data)
+                if "name" not in new_data:
+                    new_data["name"] = self.container_id
+                new_containers.append(self._compact_container(new_data, base_acs))
                 replaced = True
             else:
-                new_containers.append(item)
+                new_containers.append(self._compact_container(item, base_acs))
         if not replaced:
             new_data = dict(data)
-            if "id" not in new_data:
-                new_data["id"] = self.container_id
-            new_containers.append(new_data)
+            if "name" not in new_data:
+                new_data["name"] = self.container_id
+            new_containers.append(self._compact_container(new_data, base_acs))
         root["containers"] = new_containers
         self._write_root(root)
         return self.read(reload=False)

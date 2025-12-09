@@ -4,7 +4,6 @@
 acs:
   base_url: "http://192.168.10.200:6080"  # ACS 控制台基础地址（含协议和端口）
   api_prefix: "/sothisai"                 # ACS API 前缀，默认 /sothisai
-  service_type: "container"               # container | notebook；notebook 仅用 detail 接口且无法自动解析 IP
   login_user: "your-acs-username"         # ACS 登录用户名
   login_password: "change-me"             # ACS 登录密码（生产请修改）
   user_type: "os"                         # 登录用户类型（如 os/gridview）
@@ -18,7 +17,7 @@ containers:
   - name: "E2SRLF"                        # 唯一标识+展示名称（自定义）
     acs:
       container_name: "E2SRLF"            # 在 ACS 任务列表中的容器/任务名
-      # service_type: "container"         # 可选覆盖，notebook 模式需填写 ssh.container_ip
+      service_type: "container"           # container|notebook；notebook 模式需填写 ssh.container_ip
     ssh:
       mode: "jump"                        # direct|jump|double SSH 模式
       bastion_host: ""                    # 跳板/远程服务器 IP（direct 可空）

@@ -20,7 +20,7 @@ class MultiContainerManager:
         self.managers: Dict[str, ContainerManager] = {}
         self._tasks: List[asyncio.Task] = []
 
-    def _normalize_root(self) -> None:
+    def normalize_root(self) -> None:
         """
         Normalize config:
         - Global `acs` is shared; remove service_type from global.
@@ -73,7 +73,6 @@ class MultiContainerManager:
             # Backward compatibility: synthesize a single profile from legacy acs/ssh
             containers = [
                 {
-                    "id": (root.get("acs", {}) or {}).get("container_name") or "default",
                     "name": (root.get("acs", {}) or {}).get("container_name") or "default",
                     "acs": root.get("acs", {}),
                     "ssh": root.get("ssh", {}),
@@ -81,16 +80,16 @@ class MultiContainerManager:
             ]
         profiles: List[Dict[str, Any]] = []
         for idx, c in enumerate(containers):
-            cid = str(c.get("id") or c.get("name") or f"c{idx+1}")
+            cid = str(c.get("name") or c.get("id") or f"c{idx+1}")
             name = c.get("name") or cid
             c = dict(c)
-            c["id"] = cid
+            c["id"] = cid  # internal id kept for manager key
             c["name"] = name
             profiles.append(c)
         return profiles
 
     def init_managers(self) -> None:
-        self._normalize_root()
+        self.normalize_root()
         profiles = self.load_profiles()
         root = self.base_store.read(reload=True)
         if not root.get("containers"):

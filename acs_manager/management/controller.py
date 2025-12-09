@@ -308,22 +308,13 @@ class ContainerManager:
         local_open_port = ssh_cfg.get("local_open_port")
         container_open_port = ssh_cfg.get("container_open_port")
 
-        def add_forwards(
-            base: List[str],
-            remote_host: str = "localhost",
-            *,
-            default_remote: bool = False,
-        ) -> None:
-            """无自定义时默认使用 -R 将本地端口暴露到容器；自定义 forwards 仍按 -L。"""
-            if forwards:
-                for spec in forwards:
-                    local = spec.get("local")
-                    remote = spec.get("remote")
-                    if local and remote:
-                        base.extend(["-L", f"{local}:{remote_host}:{remote}"])
-                return
-            if default_remote and local_open_port and container_open_port:
-                base.extend(["-R", f"{container_open_port}:localhost:{local_open_port}"])
+        def add_forwards(base: List[str], remote_host: str = "localhost") -> None:
+            """仅按配置的 forwards 拼接 -L；不自动添加默认转发。"""
+            for spec in forwards or []:
+                local = spec.get("local")
+                remote = spec.get("remote")
+                if local and remote:
+                    base.extend(["-L", f"{local}:{remote_host}:{remote}"])
 
         def add_port(base: List[str], port_value: Any) -> None:
             if port_value:
@@ -372,7 +363,7 @@ class ContainerManager:
                 if not bastion_host:
                     raise ValueError("jump mode requires ssh.bastion_host or ssh.remote_server_ip")
                 cmd.extend(["-J", f"{bastion_user}@{bastion_host}"])
-            add_forwards(cmd, default_remote=True)
+            add_forwards(cmd)
             cmd.append(f"{target_user}@{target_ip}")
 
         if password_login and password:
@@ -550,14 +541,12 @@ done
             )
 
     def _reverse_specs(self, ssh_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """构造反向转发规范，缺省使用 container_open_port/local_open_port。"""
+        """构造反向转发规范，仅使用配置的 reverse_forwards。"""
         local_open_port = ssh_cfg.get("local_open_port")
         container_open_port = ssh_cfg.get("container_open_port")
         intermediate_port = ssh_cfg.get("intermediate_port")
         revs = ssh_cfg.get("reverse_forwards") or []
         specs: List[Dict[str, Any]] = []
-        if not revs and local_open_port and container_open_port:
-            revs = [{"local": local_open_port, "remote": container_open_port}]
         for spec in revs:
             local = spec.get("local")
             remote = spec.get("remote")
