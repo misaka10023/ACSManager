@@ -6,10 +6,13 @@ from pathlib import Path
 from typing import Any, Dict
 
 try:
-    import yaml
+    from ruamel.yaml import YAML
+    _yaml_rt = YAML(typ="rt")
+    _yaml_rt.preserve_quotes = True
+    _yaml_rt.indent(mapping=2, sequence=4, offset=2)
 except ImportError as exc:  # pragma: no cover - import guard
     raise ImportError(
-        "PyYAML is required to load YAML config files. Install via `pip install pyyaml`."
+        "ruamel.yaml is required to load YAML config files with comments preserved. Install via `pip install ruamel.yaml`."
     ) from exc
 
 
@@ -22,7 +25,7 @@ def load_settings(path: str | Path) -> Dict[str, Any]:
     suffix = config_path.suffix.lower()
     if suffix in {".yml", ".yaml"}:
         with config_path.open("r", encoding="utf-8") as handle:
-            return yaml.safe_load(handle) or {}
+            return _yaml_rt.load(handle) or {}
 
     if suffix == ".json":
         with config_path.open("r", encoding="utf-8") as handle:
@@ -40,18 +43,23 @@ def dump_settings(path: str | Path, data: Dict[str, Any]) -> None:
 
     suffix = config_path.suffix.lower()
     if suffix in {".yml", ".yaml"}:
-        payload = yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
-    elif suffix == ".json":
-        payload = json.dumps(data, indent=2)
-    else:
-        raise ValueError(
-            f"Unsupported config format for {config_path}. Use YAML or JSON."
-        )
+        temp_path = config_path.with_suffix(config_path.suffix + ".tmp")
+        with temp_path.open("w", encoding="utf-8") as handle:
+            _yaml_rt.dump(data, handle)
+        temp_path.replace(config_path)
+        return
 
-    temp_path = config_path.with_suffix(config_path.suffix + ".tmp")
-    with temp_path.open("w", encoding="utf-8") as handle:
-        handle.write(payload)
-    temp_path.replace(config_path)
+    if suffix == ".json":
+        payload = json.dumps(data, indent=2)
+        temp_path = config_path.with_suffix(config_path.suffix + ".tmp")
+        with temp_path.open("w", encoding="utf-8") as handle:
+            handle.write(payload)
+        temp_path.replace(config_path)
+        return
+
+    raise ValueError(
+        f"Unsupported config format for {config_path}. Use YAML or JSON."
+    )
 
 
 def get_section(

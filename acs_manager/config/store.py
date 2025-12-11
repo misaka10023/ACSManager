@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import copy
 import threading
 from pathlib import Path
 from typing import Any, Dict
@@ -25,14 +26,14 @@ class ConfigStore:
         """Force reload from disk and refresh the cache."""
         with self._lock:
             self._cache = load_settings(self.path)
-            return dict(self._cache)
+            return copy.deepcopy(self._cache)
 
     def read(self, *, reload: bool = False) -> Dict[str, Any]:
         """Return the cached config, optionally reloading from disk first."""
         with self._lock:
-            if reload or not self._cache:
+            if reload or self._cache is None:
                 self._cache = load_settings(self.path)
-            return dict(self._cache)
+            return copy.deepcopy(self._cache)
 
     def get_section(
         self,
@@ -47,18 +48,20 @@ class ConfigStore:
     def write(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Replace the entire config and persist to disk."""
         with self._lock:
-            self._cache = dict(data)
+            self._cache = copy.deepcopy(data)
             dump_settings(self.path, self._cache)
-            return dict(self._cache)
+            return copy.deepcopy(self._cache)
 
     def update(self, changes: Dict[str, Any]) -> Dict[str, Any]:
         """Shallow-merge changes into the config and persist."""
         with self._lock:
-            merged = dict(self._cache)
+            merged = copy.deepcopy(self._cache)
+            if merged is None:
+                merged = {}
             merged.update(changes)
             self._cache = merged
             dump_settings(self.path, self._cache)
-            return dict(self._cache)
+            return copy.deepcopy(self._cache)
 
     def format(self) -> str:
         return self._format
