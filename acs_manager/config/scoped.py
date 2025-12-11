@@ -79,6 +79,22 @@ class ContainerScopedStore:
         containers: List[Dict[str, Any]] = root.get("containers") or []
         base_acs = root.get("acs", {}) if isinstance(root.get("acs"), dict) else {}
         base_acs = {k: v for k, v in base_acs.items() if k not in ("container_name", "service_type")}
+
+        change_acs = changes.get("acs") if isinstance(changes, dict) else None
+        global_acs_delta: Dict[str, Any] = {}
+        container_acs_delta: Dict[str, Any] = {}
+        if isinstance(change_acs, dict):
+            for k, v in change_acs.items():
+                if k in ("container_name", "service_type"):
+                    container_acs_delta[k] = v
+                else:
+                    global_acs_delta[k] = v
+        if global_acs_delta:
+            base_acs = {**base_acs, **global_acs_delta}
+        if change_acs is not None:
+            changes = dict(changes)
+            changes["acs"] = container_acs_delta
+
         new_containers: List[Dict[str, Any]] = []
         found = False
         for item in containers:
@@ -97,6 +113,7 @@ class ContainerScopedStore:
                 updated["name"] = self.container_id
             compact = self._compact_container(updated, base_acs)
             new_containers.append(compact)
+        root["acs"] = base_acs
         root["containers"] = new_containers
         self._write_root(root)
         return self.read(reload=False)
@@ -106,6 +123,21 @@ class ContainerScopedStore:
         containers: List[Dict[str, Any]] = root.get("containers") or []
         base_acs = root.get("acs", {}) if isinstance(root.get("acs"), dict) else {}
         base_acs = {k: v for k, v in base_acs.items() if k not in ("container_name", "service_type")}
+
+        data = dict(data)
+        acs_in = data.pop("acs", {}) if isinstance(data, dict) else {}
+        global_acs_delta: Dict[str, Any] = {}
+        container_acs_delta: Dict[str, Any] = {}
+        if isinstance(acs_in, dict):
+            for k, v in acs_in.items():
+                if k in ("container_name", "service_type"):
+                    container_acs_delta[k] = v
+                else:
+                    global_acs_delta[k] = v
+        if global_acs_delta:
+            base_acs = {**base_acs, **global_acs_delta}
+        data["acs"] = container_acs_delta
+
         new_containers: List[Dict[str, Any]] = []
         replaced = False
         for item in containers:
@@ -123,6 +155,7 @@ class ContainerScopedStore:
             if "name" not in new_data:
                 new_data["name"] = self.container_id
             new_containers.append(self._compact_container(new_data, base_acs))
+        root["acs"] = base_acs
         root["containers"] = new_containers
         self._write_root(root)
         return self.read(reload=False)

@@ -694,7 +694,16 @@ done
 
     def snapshot(self) -> Dict[str, Any]:
         """获取当前状态（供 Web UI 展示）。"""
-        return dict(self.state)
+        snap = dict(self.state)
+        if not snap.get("container_ip"):
+            try:
+                ssh_cfg = self._ssh_cfg(reload=False)
+                fallback_ip = ssh_cfg.get("container_ip") if isinstance(ssh_cfg, dict) else None
+                if fallback_ip:
+                    snap["container_ip"] = fallback_ip
+            except Exception:
+                pass
+        return snap
 
     async def prepare_on_start(self, wait_interval: int = 5, start_timeout: int = 300) -> None:
         """启动阶段：登录后检查容器状态，Waiting 等待，Stopped 重启，Running 继续。"""
