@@ -19,7 +19,6 @@ containers:
   - name: "E2SRLF"                        # 唯一标识+展示名称（自定义）
     acs:
       container_name: "E2SRLF"            # 在 ACS 任务列表中的容器/任务名
-      service_type: "container"           # container|notebook；notebook 模式需填写 ssh.container_ip
     restart:
       strategy: "restart"                # restart|recreate，recreate 时按“名称_次数_时间”新建任务
     ssh:
