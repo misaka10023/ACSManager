@@ -238,8 +238,9 @@ class ContainerManager:
 
         restart_cfg = self._restart_cfg(reload=True)
         if restart_cfg.get("strategy") == "recreate":
-            logger.warning("Recreate strategy enabled; creating new task for %s", name)
-            created = self._recreate_container_task(name, task)
+            base_name = self.display_name or name
+            logger.warning("Recreate strategy enabled; creating new task for %s (base name: %s)", name, base_name)
+            created = self._recreate_container_task(base_name, task)
             if created:
                 return
             logger.warning("Recreate task failed; falling back to restart original task.")
