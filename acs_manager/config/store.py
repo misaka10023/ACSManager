@@ -91,7 +91,7 @@ class ConfigStore:
         """
         Merge user values from `current` into `template` shape.
         - Dict: only overlay keys that exist in template (including config_version).
-        - List: prefer current list entirely when types match.
+        - List: if both are list of dicts and template提供示例，则按模板元素与当前元素逐项合并；否则保持当前列表。
         - Scalar: prefer current when types match; otherwise keep template.
         """
         if isinstance(template, dict) and isinstance(current, dict):
@@ -101,6 +101,9 @@ class ConfigStore:
                     merged[key] = self._merge_with_template(value, current[key])
             return merged
         if isinstance(template, list) and isinstance(current, list):
+            if template and isinstance(template[0], dict) and all(isinstance(x, dict) for x in current):
+                exemplar = template[0]
+                return [self._merge_with_template(exemplar, item) for item in current]
             return type(template)(current)
         if type(template) is type(current):
             return current
