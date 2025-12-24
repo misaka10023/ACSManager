@@ -248,7 +248,7 @@
 
   function renderForwardRow(type, values = {}) {
     const row = document.createElement('div');
-    row.className = 'grid grid-cols-3 gap-2 items-center text-xs border rounded p-2 bg-slate-50';
+    row.className = 'grid grid-cols-3 gap-2 items-center text-xs border rounded p-2 bg-slate-100';
     row.dataset.kind = type;
     const isReverse = type === 'reverse';
     row.innerHTML = `
@@ -290,7 +290,7 @@
     const listEl = document.getElementById('container-form-list');
     if (!listEl) return;
     const card = document.createElement('div');
-    card.className = 'p-3 border rounded bg-white shadow-sm space-y-3';
+    card.className = 'p-3 border border-slate-200 rounded bg-slate-50 shadow-sm space-y-3';
     card.dataset.index = idx.toString();
     const ssh = container.ssh || {};
     const restart = container.restart || {};
@@ -300,29 +300,33 @@
         <button type="button" class="btn btn-danger btn-xxs" data-action="remove">删除</button>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <label>名称(name)<input type="text" class="input" data-field="name" value="${container.name || ''}"></label>
-        <label>ACS 容器名<input type="text" class="input" data-field="container_name" value="${(container.acs && container.acs.container_name) || ''}"></label>
-        <label>重启策略
-          <select class="input" data-field="restart_strategy">
+        <label class="field">名称(name)
+          <input type="text" class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="name" value="${container.name || ''}">
+        </label>
+        <label class="field">ACS 容器名
+          <input type="text" class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="container_name" value="${(container.acs && container.acs.container_name) || ''}">
+        </label>
+        <label class="field">重启策略
+          <select class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="restart_strategy">
             <option value="restart" ${restart.strategy === 'recreate' ? '' : 'selected'}>restart</option>
             <option value="recreate" ${restart.strategy === 'recreate' ? 'selected' : ''}>recreate</option>
           </select>
         </label>
-        <label>SSH 模式
-          <select class="input" data-field="ssh_mode">
+        <label class="field">SSH 模式
+          <select class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="ssh_mode">
             <option value="jump" ${ssh.mode === 'direct' || ssh.mode === 'double' ? '' : 'selected'}>jump</option>
             <option value="direct" ${ssh.mode === 'direct' ? 'selected' : ''}>direct</option>
             <option value="double" ${ssh.mode === 'double' ? 'selected' : ''}>double</option>
           </select>
         </label>
-        <label>跳板/远端 Host<input type="text" class="input" data-field="bastion_host" value="${ssh.bastion_host || ''}"></label>
-        <label>跳板用户<input type="text" class="input" data-field="bastion_user" value="${ssh.bastion_user || ''}"></label>
-        <label>目标用户<input type="text" class="input" data-field="target_user" value="${ssh.target_user || ''}"></label>
-        <label>SSH 端口<input type="number" class="input" data-field="port" value="${ssh.port ?? ''}"></label>
-        <label>容器 SSH 端口<input type="number" class="input" data-field="container_port" value="${ssh.container_port ?? ''}"></label>
+        <label class="field">跳板/远端 Host<input type="text" class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="bastion_host" value="${ssh.bastion_host || ''}"></label>
+        <label class="field">跳板用户<input type="text" class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="bastion_user" value="${ssh.bastion_user || ''}"></label>
+        <label class="field">目标用户<input type="text" class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="target_user" value="${ssh.target_user || ''}"></label>
+        <label class="field">SSH 端口<input type="number" class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="port" value="${ssh.port ?? ''}"></label>
+        <label class="field">容器 SSH 端口<input type="number" class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="container_port" value="${ssh.container_port ?? ''}"></label>
         <label class="flex items-center gap-2"><input type="checkbox" class="checkbox" data-field="password_login" ${ssh.password_login ? 'checked' : ''}>密码登录</label>
-        <label>密码<input type="text" class="input" data-field="password" value="${ssh.password || ''}"></label>
-        <label>容器 IP(兜底)<input type="text" class="input" data-field="container_ip" value="${ssh.container_ip || ''}"></label>
+        <label class="field">密码<input type="text" class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="password" value="${ssh.password || ''}"></label>
+        <label class="field">容器 IP(兜底)<input type="text" class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="container_ip" value="${ssh.container_ip || ''}"></label>
       </div>
       <div class="space-y-2">
         <div class="flex items-center justify-between text-xs text-slate-600">
