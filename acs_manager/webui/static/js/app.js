@@ -164,50 +164,306 @@
   }
 
   // ---------- Config ----------
+  let cfgVersion = null;
+
+  function setValue(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.type === 'checkbox') {
+      el.checked = Boolean(value);
+    } else {
+      el.value = value ?? '';
+    }
+  }
+
+  function getValue(id) {
+    const el = document.getElementById(id);
+    if (!el) return null;
+    if (el.type === 'checkbox') {
+      return el.checked;
+    }
+    if (el.type === 'number') {
+      const v = el.value;
+      return v === '' ? null : Number(v);
+    }
+    return el.value;
+  }
+
+  function parseForwardLines(text) {
+    if (!text) return [];
+    return text
+      .split(/\n|,/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => l.split(':'))
+      .filter((parts) => parts.length >= 2)
+      .map((parts) => {
+        const [local, remote] = parts;
+        return { local: Number(local), remote: Number(remote) };
+      })
+      .filter((item) => !Number.isNaN(item.local) && !Number.isNaN(item.remote));
+  }
+
+  function parseReverseLines(text) {
+    if (!text) return [];
+    return text
+      .split(/\n|,/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => l.split(':'))
+      .filter((parts) => parts.length >= 2)
+      .map((parts) => {
+        const [local, remote, mid] = parts;
+        return {
+          local: Number(local),
+          remote: Number(remote),
+          mid: mid !== undefined ? Number(mid) : null,
+        };
+      })
+      .filter((item) => !Number.isNaN(item.local) && !Number.isNaN(item.remote));
+  }
+
+  function forwardLines(list) {
+    if (!Array.isArray(list)) return '';
+    return list
+      .map((item) => {
+        if (item.local == null || item.remote == null) return null;
+        return `${item.local}:${item.remote}`;
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  function reverseLines(list) {
+    if (!Array.isArray(list)) return '';
+    return list
+      .map((item) => {
+        if (item.local == null || item.remote == null) return null;
+        if (item.mid != null) return `${item.local}:${item.remote}:${item.mid}`;
+        return `${item.local}:${item.remote}`;
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  function renderContainerCard(container = {}, idx = 0) {
+    const listEl = document.getElementById('container-form-list');
+    if (!listEl) return;
+    const card = document.createElement('div');
+    card.className = 'p-3 border rounded bg-white shadow-sm space-y-2';
+    card.dataset.index = idx.toString();
+    const ssh = container.ssh || {};
+    const restart = container.restart || {};
+    card.innerHTML = `
+      <div class="flex items-center justify-between gap-2">
+        <div class="text-sm font-semibold">容器 #${idx + 1}</div>
+        <button type="button" class="btn btn-danger btn-xxs" data-action="remove">删除</button>
+      </div>
+      <div class="form-grid">
+        <label>名称(name)<input type="text" class="input" data-field="name" value="${container.name || ''}"></label>
+        <label>ACS 容器名<input type="text" class="input" data-field="container_name" value="${(container.acs && container.acs.container_name) || ''}"></label>
+        <label>重启策略
+          <select class="input" data-field="restart_strategy">
+            <option value="restart" ${restart.strategy === 'recreate' ? '' : 'selected'}>restart</option>
+            <option value="recreate" ${restart.strategy === 'recreate' ? 'selected' : ''}>recreate</option>
+          </select>
+        </label>
+        <label>SSH 模式
+          <select class="input" data-field="ssh_mode">
+            <option value="jump" ${ssh.mode === 'direct' || ssh.mode === 'double' ? '' : 'selected'}>jump</option>
+            <option value="direct" ${ssh.mode === 'direct' ? 'selected' : ''}>direct</option>
+            <option value="double" ${ssh.mode === 'double' ? 'selected' : ''}>double</option>
+          </select>
+        </label>
+        <label>跳板/远端 Host<input type="text" class="input" data-field="bastion_host" value="${ssh.bastion_host || ''}"></label>
+        <label>跳板用户<input type="text" class="input" data-field="bastion_user" value="${ssh.bastion_user || ''}"></label>
+        <label>目标用户<input type="text" class="input" data-field="target_user" value="${ssh.target_user || ''}"></label>
+        <label>SSH 端口<input type="number" class="input" data-field="port" value="${ssh.port ?? ''}"></label>
+        <label>容器 SSH 端口<input type="number" class="input" data-field="container_port" value="${ssh.container_port ?? ''}"></label>
+        <label class="flex items-center gap-2"><input type="checkbox" class="checkbox" data-field="password_login" ${ssh.password_login ? 'checked' : ''}>密码登录</label>
+        <label>密码<input type="text" class="input" data-field="password" value="${ssh.password || ''}"></label>
+        <label>容器 IP(兜底)<input type="text" class="input" data-field="container_ip" value="${ssh.container_ip || ''}"></label>
+      </div>
+      <div class="form-grid">
+        <label>正向转发(-L)<textarea class="input" data-field="forwards" rows="3" placeholder="本地:远端">${forwardLines(ssh.forwards)}</textarea></label>
+        <label>反向转发(-R)<textarea class="input" data-field="reverse_forwards" rows="3" placeholder="本地:远端[:中间端口]">${reverseLines(ssh.reverse_forwards)}</textarea></label>
+      </div>
+    `;
+    listEl.appendChild(card);
+  }
+
+  function collectContainers() {
+    const listEl = document.getElementById('container-form-list');
+    if (!listEl) return [];
+    const cards = Array.from(listEl.querySelectorAll('[data-index]'));
+    return cards.map((card) => {
+      const get = (selector) => {
+        const el = card.querySelector(selector);
+        if (!el) return '';
+        if (el.type === 'checkbox') return el.checked;
+        return el.value;
+      };
+      const name = get('input[data-field="name"]').trim();
+      const containerName = get('input[data-field="container_name"]').trim() || name;
+      const restartStrategy = get('select[data-field="restart_strategy"]') || 'restart';
+      const forwards = parseForwardLines(get('textarea[data-field="forwards"]'));
+      const reverseForwards = parseReverseLines(get('textarea[data-field="reverse_forwards"]'));
+      const port = Number(get('input[data-field="port"]')) || null;
+      const containerPort = Number(get('input[data-field="container_port"]')) || null;
+      return {
+        name,
+        acs: {
+          container_name: containerName,
+        },
+        restart: {
+          strategy: restartStrategy || 'restart',
+        },
+        ssh: {
+          mode: get('select[data-field="ssh_mode"]') || 'jump',
+          bastion_host: get('input[data-field="bastion_host"]').trim(),
+          bastion_user: get('input[data-field="bastion_user"]').trim(),
+          target_user: get('input[data-field="target_user"]').trim() || 'root',
+          port: port || undefined,
+          container_port: containerPort || undefined,
+          password_login: Boolean(get('input[data-field="password_login"]')),
+          password: get('input[data-field="password"]'),
+          forwards,
+          reverse_forwards: reverseForwards,
+          container_ip: get('input[data-field="container_ip"]').trim(),
+        },
+      };
+    });
+  }
+
+  function bindContainerActions() {
+    const listEl = document.getElementById('container-form-list');
+    if (!listEl) return;
+    listEl.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('[data-action="remove"]');
+      if (!btn) return;
+      const card = btn.closest('[data-index]');
+      if (card) card.remove();
+    });
+  }
+
+  function loadForm(data) {
+    cfgVersion = data.config_version || null;
+    setValue('acs-base-url', data.acs?.base_url);
+    setValue('acs-api-prefix', data.acs?.api_prefix);
+    setValue('acs-login-user', data.acs?.login_user);
+    setValue('acs-login-password', data.acs?.login_password);
+    setValue('acs-user-type', data.acs?.user_type);
+    setValue('acs-public-key', data.acs?.public_key);
+    setValue('acs-verify-ssl', data.acs?.verify_ssl);
+    setValue('acs-cookie-jsessionid', data.acs?.cookies?.JSESSIONID);
+    setValue('acs-cookie-gv', data.acs?.cookies?.GV_JSESSIONID);
+
+    setValue('webui-host', data.webui?.host);
+    setValue('webui-port', data.webui?.port);
+    setValue('webui-root-path', data.webui?.root_path);
+    setValue('auth-enabled', data.webui?.auth?.enabled);
+    setValue('auth-username', data.webui?.auth?.username);
+    setValue('auth-password', data.webui?.auth?.password);
+    setValue('auth-password-hash', data.webui?.auth?.password_hash);
+    setValue('auth-secret-key', data.webui?.auth?.secret_key);
+    setValue('auth-session-ttl', data.webui?.auth?.session_ttl);
+
+    setValue('log-level', data.logging?.level);
+
+    const containers = Array.isArray(data.containers) && data.containers.length ? data.containers : [{ name: '', acs: { container_name: '' }, restart: { strategy: 'restart' }, ssh: {} }];
+    const listEl = document.getElementById('container-form-list');
+    if (listEl) listEl.innerHTML = '';
+    containers.forEach((c, idx) => renderContainerCard(c, idx));
+  }
+
   async function loadConfig() {
-    const area = document.getElementById('cfg-editor');
     const status = document.getElementById('cfg-status');
-    if (!area || !status) return;
     try {
       const data = await fetchJSON('/config?reload=true');
-      area.value = JSON.stringify(data, null, 2);
-      status.textContent = '已加载最新配置';
-      status.className = 'text-sm text-slate-600 mt-2';
+      loadForm(data || {});
+      if (status) {
+        status.textContent = '已加载最新配置';
+        status.className = 'text-sm text-slate-600 mt-2';
+      }
     } catch (e) {
-      status.textContent = String(e);
-      status.className = 'text-sm text-red-600 mt-2';
+      if (status) {
+        status.textContent = String(e);
+        status.className = 'text-sm text-red-600 mt-2';
+      }
     }
   }
 
   async function saveConfig() {
-    const area = document.getElementById('cfg-editor');
     const status = document.getElementById('cfg-status');
-    if (!area || !status) return;
     try {
-      const parsed = JSON.parse(area.value);
+      const payload = {
+        config_version: cfgVersion,
+        acs: {
+          base_url: getValue('acs-base-url'),
+          api_prefix: getValue('acs-api-prefix'),
+          login_user: getValue('acs-login-user'),
+          login_password: getValue('acs-login-password'),
+          user_type: getValue('acs-user-type'),
+          public_key: getValue('acs-public-key'),
+          verify_ssl: Boolean(getValue('acs-verify-ssl')),
+          cookies: {
+            JSESSIONID: getValue('acs-cookie-jsessionid') || '',
+            GV_JSESSIONID: getValue('acs-cookie-gv') || '',
+          },
+        },
+        webui: {
+          host: getValue('webui-host'),
+          port: getValue('webui-port'),
+          root_path: getValue('webui-root-path'),
+          auth: {
+            enabled: Boolean(getValue('auth-enabled')),
+            username: getValue('auth-username'),
+            password: getValue('auth-password'),
+            password_hash: getValue('auth-password-hash'),
+            secret_key: getValue('auth-secret-key'),
+            session_ttl: getValue('auth-session-ttl'),
+          },
+        },
+        logging: {
+          level: getValue('log-level') || 'INFO',
+        },
+        containers: collectContainers(),
+      };
+
       const res = await fetch(withBase('/config'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(parsed),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) {
         throw new Error(JSON.stringify(data));
       }
-      status.textContent = '保存成功';
-      status.className = 'text-sm text-green-600 mt-2';
+      if (status) {
+        status.textContent = '保存成功';
+        status.className = 'text-sm text-green-600 mt-2';
+      }
     } catch (e) {
-      status.textContent = `保存失败: ${String(e)}`;
-      status.className = 'text-sm text-red-600 mt-2';
+      if (status) {
+        status.textContent = `保存失败: ${String(e)}`;
+        status.className = 'text-sm text-red-600 mt-2';
+      }
     }
   }
 
   function initConfig() {
     loadConfig();
+    bindContainerActions();
     const btnLoad = document.getElementById('cfg-load');
     const btnSave = document.getElementById('cfg-save');
+    const btnAdd = document.getElementById('container-add');
     if (btnLoad) btnLoad.addEventListener('click', loadConfig);
     if (btnSave) btnSave.addEventListener('click', saveConfig);
+    if (btnAdd) btnAdd.addEventListener('click', () => {
+      const listEl = document.getElementById('container-form-list');
+      const idx = listEl ? listEl.children.length : 0;
+      renderContainerCard({ name: '', acs: { container_name: '' }, restart: { strategy: 'restart' }, ssh: {} }, idx);
+    });
   }
 
   // ---------- Logs ----------

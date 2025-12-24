@@ -170,11 +170,11 @@ Dashboard 页面会定期通过 JS 自动刷新健康状态 / 状态 / IP；点�
 
 ### 配置编辑 `/ui/config`
 
-- 页面加载时，会将当前完整配置以 JSON 形式预填进文本框。
+- 可视化表单：全局 ACS（登录、公钥、cookies）、WebUI（host/port/root_path/auth）、日志级别、容器列表（name、ACS 容器名、重启策略、SSH 模式/端口/跳板、转发、兜底 IP 等）。
+- 容器列表可新增/删除；转发每行填写 `本地:远端` 或 `本地:远端:中间端口`（double 需中间端口）；使用 password_hash 时清空明文密码。
 - 按钮：
-  - “重新载入”：`GET /config?reload=true`，重新读盘填入文本框。
-  - “保存配置”：解析文本框 JSON，调用 `PUT /config` 覆盖配置文件。
-- 保存成功/失败会在下方以绿色/红色提示。
+  - “重新载入”：`GET /config?reload=true`，重新读盘填充表单。
+  - “保存配置”：收集表单并调用 `PUT /config` 覆盖配置文件，结果会提示。
 
 **关键配置变更的自动应用：**
 

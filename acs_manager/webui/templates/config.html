@@ -8,16 +8,72 @@
       <button id="cfg-save" class="btn btn-primary">保存配置</button>
     </div>
   </div>
-  <p class="text-sm text-slate-600 mb-2">以 JSON 方式编辑完整配置。保存即调用 PUT /config。</p>
   <div class="text-xs text-slate-600 mb-3 space-y-1">
-    <div><span class="font-semibold">常用字段：</span>acs.base_url / api_prefix / login_user / login_password / public_key；ssh.mode / bastion_host / target_user / forwards；webui.root_path / webui.auth.*。</div>
-    <div><span class="font-semibold">注意：</span>如使用 password_hash，请清空 password；root_path 需与 Nginx 前缀一致（如 /acsmanager）。</div>
+    <div><span class="font-semibold">提示：</span>配置项均为 UTF-8；root_path 需与反代前缀一致；使用 password_hash 时清空 password。</div>
+    <div><span class="font-semibold">转发：</span>正向/反向转发每行填写 <code>本地:远端</code> 或 <code>本地:远端:中间端口</code>（double 需中间端口）。</div>
   </div>
-  <textarea id="cfg-editor" class="w-full h-96 font-mono text-sm border rounded p-3 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-200">{{ config_json or "" }}</textarea>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="space-y-4">
+      <div class="subcard">
+        <div class="subcard-title">全局 ACS</div>
+        <div class="form-grid">
+          <label>Base URL<input id="acs-base-url" type="text" class="input" placeholder="http://192.168.10.200:6080"></label>
+          <label>API 前缀<input id="acs-api-prefix" type="text" class="input" placeholder="/sothisai"></label>
+          <label>登录用户<input id="acs-login-user" type="text" class="input"></label>
+          <label>登录密码<input id="acs-login-password" type="text" class="input"></label>
+          <label>用户类型<input id="acs-user-type" type="text" class="input" placeholder="os"></label>
+          <label>公钥(Base64)<input id="acs-public-key" type="text" class="input"></label>
+          <label class="flex items-center gap-2"><input id="acs-verify-ssl" type="checkbox" class="checkbox">验证 SSL</label>
+          <label>JSESSIONID<input id="acs-cookie-jsessionid" type="text" class="input" placeholder="可选"></label>
+          <label>GV_JSESSIONID<input id="acs-cookie-gv" type="text" class="input" placeholder="可选"></label>
+        </div>
+      </div>
+
+      <div class="subcard">
+        <div class="subcard-title">Web UI</div>
+        <div class="form-grid">
+          <label>Host<input id="webui-host" type="text" class="input" placeholder="0.0.0.0"></label>
+          <label>Port<input id="webui-port" type="number" class="input" placeholder="8000"></label>
+          <label>Root Path<input id="webui-root-path" type="text" class="input" placeholder="/acsmanager"></label>
+        </div>
+        <div class="mt-3">
+          <div class="text-sm font-semibold mb-1">认证</div>
+          <div class="form-grid">
+            <label class="flex items-center gap-2"><input id="auth-enabled" type="checkbox" class="checkbox">启用登录</label>
+            <label>用户名<input id="auth-username" type="text" class="input" placeholder="admin"></label>
+            <label>密码<input id="auth-password" type="text" class="input" placeholder="change-me"></label>
+            <label>密码哈希<input id="auth-password-hash" type="text" class="input" placeholder="sha256"></label>
+            <label>Secret Key<input id="auth-secret-key" type="text" class="input" placeholder="change-me-please"></label>
+            <label>Session TTL(秒)<input id="auth-session-ttl" type="number" class="input" placeholder="43200"></label>
+          </div>
+        </div>
+      </div>
+
+      <div class="subcard">
+        <div class="subcard-title">日志</div>
+        <div class="form-grid">
+          <label>Level<input id="log-level" type="text" class="input" placeholder="INFO"></label>
+        </div>
+      </div>
+    </div>
+
+    <div class="space-y-4">
+      <div class="subcard">
+        <div class="subcard-title flex items-center justify-between">
+          <span>容器列表</span>
+          <button id="container-add" class="btn btn-secondary btn-xxs">添加容器</button>
+        </div>
+        <div id="container-form-list" class="space-y-3"></div>
+      </div>
+
+      <div class="subcard">
+        <div class="subcard-title">示例模板（settings.example.yaml）</div>
+        <pre class="code-block h-64 overflow-y-auto text-xs whitespace-pre-wrap">{{ config_template or "未能读取示例模板" }}</pre>
+      </div>
+    </div>
+  </div>
+
   <div id="cfg-status" class="text-sm text-slate-600 mt-2"></div>
-</div>
-<div class="card mt-4">
-  <div class="card-title">示例模板（settings.example.yaml）</div>
-  <pre class="code-block h-72 overflow-y-auto text-xs whitespace-pre-wrap">{{ config_template or "未能读取示例模板" }}</pre>
 </div>
 {% endblock %}
