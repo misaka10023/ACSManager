@@ -128,6 +128,97 @@ class ContainerManager:
         """检测到容器停止时触发重启。"""
         await self.restart_container()
 
+    def _recreate_container_task(self, base_name: str, task: Dict[str, Any]) -> bool:
+        """创建新的任务实例，名称遵循 baseName_counter_timestamp。"""
+        task_id = task.get("instanceServiceId") or task.get("id")
+        if not task_id:
+            logger.error("Cannot recreate task without instanceServiceId/id.")
+            return False
+
+        restart_cfg = self._restart_cfg(reload=False)
+        new_count = restart_cfg.get("create_count", 0) + 1
+        timestamp = dt.datetime.now().strftime("%Y%m%d%H%M%S")
+        new_name = f"{base_name}_{new_count}_{timestamp}"
+
+        try:
+            detail = self.container_client.get_instance_detail(task_id)
+        except Exception as exc:
+            logger.error("Failed to fetch task detail for recreate: %s", exc)
+            return False
+
+        data = detail.get("data") if isinstance(detail, dict) else None
+        if data is None and isinstance(detail, dict):
+            data = detail
+        if not isinstance(data, dict):
+            logger.error("Unexpected detail format when recreating task %s", task_id)
+            return False
+
+        payload: Dict[str, Any] = {}
+        allowed_keys = [
+            "description",
+            "taskType",
+            "acceleratorType",
+            "version",
+            "imagePath",
+            "timeoutLimit",
+            "taskNumber",
+            "resourceGroup",
+            "useStartScript",
+            "startScriptActionScope",
+            "startScriptContent",
+            "cpuNumber",
+            "ramSize",
+            "gpuNumber",
+            "env",
+            "mountInfoList",
+            "containerPortInfoList",
+            "headerNotebookId",
+            "headerNotebookIp",
+        ]
+        for key in allowed_keys:
+            if key in data and data[key] is not None:
+                payload[key] = data[key]
+
+        payload["instanceServiceName"] = new_name
+        payload.setdefault("description", data.get("description", ""))
+        payload.setdefault("taskType", (data.get("taskType") or "jupyter"))
+        payload.setdefault("acceleratorType", data.get("acceleratorType") or "gpu")
+        payload.setdefault("timeoutLimit", data.get("timeoutLimit") or "360:00:00")
+        payload.setdefault("taskNumber", data.get("taskNumber") or 1)
+        payload.setdefault("resourceGroup", data.get("resourceGroup") or "default")
+        payload.setdefault("useStartScript", data.get("useStartScript") or False)
+        payload.setdefault("startScriptActionScope", data.get("startScriptActionScope") or "all")
+        payload.setdefault("startScriptContent", data.get("startScriptContent") or "")
+        payload.setdefault("cpuNumber", data.get("cpuNumber") or 1)
+        payload.setdefault("ramSize", data.get("ramSize") or 1024)
+        payload.setdefault("gpuNumber", data.get("gpuNumber") or 0)
+        payload.setdefault("env", data.get("env") or "")
+        payload.setdefault("mountInfoList", data.get("mountInfoList") or [])
+        payload.setdefault("containerPortInfoList", data.get("containerPortInfoList") or [])
+
+        try:
+            resp = self.container_client.create_task(payload)
+        except Exception as exc:
+            logger.error("Create new task failed: %s", exc)
+            return False
+
+        if str(resp.get("code")) == "0":
+            restart_cfg.update(
+                {
+                    "strategy": restart_cfg.get("strategy") or "recreate",
+                    "create_count": new_count,
+                    "last_created_at": dt.datetime.now().isoformat(),
+                    "last_created_name": new_name,
+                }
+            )
+            self._persist_restart_cfg(restart_cfg)
+            self.state["last_restart"] = dt.datetime.now()
+            logger.info("Created new task %s from %s: %s", new_name, base_name, resp)
+            return True
+
+        logger.error("Create new task failed: %s", resp)
+        return False
+
     async def restart_container(self) -> None:
         """调用 ACS 重启接口。"""
         acs_cfg = self._acs_cfg(reload=True)
@@ -148,6 +239,14 @@ class ContainerManager:
         if not task_id:
             logger.error("Container %s missing instanceServiceId; cannot restart.", name)
             return
+
+        restart_cfg = self._restart_cfg(reload=True)
+        if restart_cfg.get("strategy") == "recreate":
+            logger.warning("Recreate strategy enabled; creating new task for %s", name)
+            created = self._recreate_container_task(name, task)
+            if created:
+                return
+            logger.warning("Recreate task failed; falling back to restart original task.")
 
         logger.warning("Attempting to restart container %s (task id: %s)", name, task_id)
         try:
@@ -776,3 +875,24 @@ done
 
     def _ssh_cfg(self, *, reload: bool = False) -> Dict[str, Any]:
         return self.store.get_section("ssh", default={}, reload=reload)
+
+    def _restart_cfg(self, *, reload: bool = False) -> Dict[str, Any]:
+        cfg = self.store.get_section("restart", default={}, reload=reload)
+        strategy = (cfg.get("strategy") or "restart").lower()
+        create_count = cfg.get("create_count") or 0
+        try:
+            create_count = int(create_count)
+        except Exception:
+            create_count = 0
+        return {
+            "strategy": strategy,
+            "create_count": create_count,
+            "last_created_at": cfg.get("last_created_at"),
+            "last_created_name": cfg.get("last_created_name"),
+        }
+
+    def _persist_restart_cfg(self, cfg: Dict[str, Any]) -> None:
+        try:
+            self.store.update({"restart": cfg})
+        except Exception as exc:
+            logger.warning("Failed to persist restart config: %s", exc)

@@ -54,11 +54,13 @@ class MultiContainerManager:
                 if not ssh_clean.get("bastion_host") and ssh_clean.get("remote_server_ip"):
                     ssh_clean["bastion_host"] = ssh_clean.get("remote_server_ip")
                 ssh_clean.pop("remote_server_ip", None)
+                restart_cfg = c.get("restart", {}) if isinstance(c.get("restart"), dict) else {}
                 normalized.append(
                     {
                         "name": name,
                         "acs": acs_override,
                         "ssh": ssh_clean,
+                        "restart": restart_cfg,
                     }
                 )
             root["containers"] = normalized

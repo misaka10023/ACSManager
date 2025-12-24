@@ -394,3 +394,8 @@ class ContainerClient:
         """调用重启接口 /api/instance-service/task/actions/restart。"""
         url = self._url_api("/api/instance-service/task/actions/restart")
         return self._request_json("post", url, json={"id": task_id})
+
+    def create_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """创建新任务 /api/instance-service/task。"""
+        url = self._url_api("/api/instance-service/task")
+        return self._request_json("post", url, json=payload)
