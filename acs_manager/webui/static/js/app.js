@@ -41,6 +41,7 @@
         const status = c.container_status || 'unknown';
         const tunnel = c.tunnel_status || 'stopped';
         const lastSeen = c.last_seen || '';
+        const remaining = c.remaining_time_str || '';
         return `
           <div class="rounded-2xl border border-white/60 bg-white/80 shadow-sm shadow-slate-900/10 p-4 flex flex-col gap-2">
             <div class="flex items-center justify-between gap-2">
@@ -49,6 +50,7 @@
             </div>
             <div class="text-xs text-slate-600">Status: ${status}</div>
             <div class="text-xs text-slate-600 truncate">IP: <span class="font-mono">${ip}</span></div>
+            ${remaining ? `<div class="text-xs text-slate-600">剩余时间: ${remaining}</div>` : ''}
             ${lastSeen ? `<div class="text-xs text-slate-500">Last seen: ${lastSeen}</div>` : ''}
             <div class="mt-2 grid grid-cols-2 gap-2 text-[13px]">
               <button class="btn btn-primary btn-xxs" data-action="refresh" data-id="${cid}">Refresh IP</button>
