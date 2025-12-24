@@ -32,13 +32,14 @@ containers:
       password: ""                        # 密码登录的密码（若启用 password_login）
       forwards: []                        # 正向转发列表 (-L)，元素格式如 {"local": 8080, "remote": 80}
       reverse_forwards: []                # 反向转发列表 (-R)，格式：字典或 "本地:容器[:中间端口]"；double 必须包含中间端口
-      container_ip: ""                    # 可选兜底 IP；notebook 模式必填，解析到新 IP 会写回
+      container_ip: ""                    # 可选兜底 IP；解析到新 IP 会写回
 
 # 可按需继续添加更多容器
 #  - name: "Another"
 #    acs:
 #      container_name: "Another"
-#      service_type: "container"
+#    restart:
+#      strategy: "restart"
 #    ssh:
 #      mode: "jump"
 #      bastion_host: ""

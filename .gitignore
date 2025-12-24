@@ -10,6 +10,7 @@ config/settings.yaml
 __pycache__/
 logs/
 AGENTS.md
+要求.txt
 
 # IntelliJ IDEA local files (merged from .idea/.gitignore)
 /shelf/
