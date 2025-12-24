@@ -290,55 +290,55 @@
     const listEl = document.getElementById('container-form-list');
     if (!listEl) return;
     const card = document.createElement('div');
-    card.className = 'p-3 border border-slate-200 rounded bg-slate-50 shadow-sm space-y-3';
+    card.className = 'rounded-2xl border border-white/60 bg-white/80 shadow-sm shadow-slate-900/10 p-4 sm:p-5 space-y-3';
     card.dataset.index = idx.toString();
     const ssh = container.ssh || {};
     const restart = container.restart || {};
     card.innerHTML = `
       <div class="flex items-center justify-between gap-2">
-        <div class="text-sm font-semibold">容器 #${idx + 1}</div>
-        <button type="button" class="btn btn-danger btn-xxs" data-action="remove">删除</button>
+        <div class="text-sm font-semibold text-slate-900">容器 #${idx + 1}</div>
+        <button type="button" class="px-3 py-1.5 text-xs rounded-xl bg-red-50 text-red-700 border border-red-100 hover:bg-red-100 transition duration-150" data-action="remove">删除</button>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <label class="field">名称(name)
-          <input type="text" class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="name" value="${container.name || ''}">
+        <label class="flex flex-col gap-1 text-xs text-slate-600">名称(name)
+          <input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="name" value="${container.name || ''}">
         </label>
-        <label class="field">ACS 容器名
-          <input type="text" class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="container_name" value="${(container.acs && container.acs.container_name) || ''}">
+        <label class="flex flex-col gap-1 text-xs text-slate-600">ACS 容器名
+          <input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="container_name" value="${(container.acs && container.acs.container_name) || ''}">
         </label>
-        <label class="field">重启策略
-          <select class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="restart_strategy">
+        <label class="flex flex-col gap-1 text-xs text-slate-600">重启策略
+          <select class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="restart_strategy">
             <option value="restart" ${restart.strategy === 'recreate' ? '' : 'selected'}>restart</option>
             <option value="recreate" ${restart.strategy === 'recreate' ? 'selected' : ''}>recreate</option>
           </select>
         </label>
-        <label class="field">SSH 模式
-          <select class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="ssh_mode">
+        <label class="flex flex-col gap-1 text-xs text-slate-600">SSH 模式
+          <select class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="ssh_mode">
             <option value="jump" ${ssh.mode === 'direct' || ssh.mode === 'double' ? '' : 'selected'}>jump</option>
             <option value="direct" ${ssh.mode === 'direct' ? 'selected' : ''}>direct</option>
             <option value="double" ${ssh.mode === 'double' ? 'selected' : ''}>double</option>
           </select>
         </label>
-        <label class="field">跳板/远端 Host<input type="text" class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="bastion_host" value="${ssh.bastion_host || ''}"></label>
-        <label class="field">跳板用户<input type="text" class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="bastion_user" value="${ssh.bastion_user || ''}"></label>
-        <label class="field">目标用户<input type="text" class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="target_user" value="${ssh.target_user || ''}"></label>
-        <label class="field">SSH 端口<input type="number" class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="port" value="${ssh.port ?? ''}"></label>
-        <label class="field">容器 SSH 端口<input type="number" class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="container_port" value="${ssh.container_port ?? ''}"></label>
-        <label class="flex items-center gap-2"><input type="checkbox" class="checkbox" data-field="password_login" ${ssh.password_login ? 'checked' : ''}>密码登录</label>
-        <label class="field">密码<input type="text" class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="password" value="${ssh.password || ''}"></label>
-        <label class="field">容器 IP(兜底)<input type="text" class="input bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" data-field="container_ip" value="${ssh.container_ip || ''}"></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">跳板/远端 Host<input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="bastion_host" value="${ssh.bastion_host || ''}"></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">跳板用户<input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="bastion_user" value="${ssh.bastion_user || ''}"></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">目标用户<input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="target_user" value="${ssh.target_user || ''}"></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">SSH 端口<input type="number" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="port" value="${ssh.port ?? ''}"></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">容器 SSH 端口<input type="number" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="container_port" value="${ssh.container_port ?? ''}"></label>
+        <label class="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-200" data-field="password_login" ${ssh.password_login ? 'checked' : ''}>密码登录</label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">密码<input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="password" value="${ssh.password || ''}"></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">容器 IP(兜底)<input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="container_ip" value="${ssh.container_ip || ''}"></label>
       </div>
       <div class="space-y-2">
         <div class="flex items-center justify-between text-xs text-slate-600">
           <span class="font-semibold">正向转发 (-L)</span>
-          <button type="button" class="btn btn-secondary btn-xxs" data-action="add-forward">新增</button>
+          <button type="button" class="px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white/80 text-slate-800 hover:border-indigo-200 hover:text-indigo-700 transition duration-150" data-action="add-forward">新增</button>
         </div>
         <div class="space-y-2" data-list="forwards"></div>
       </div>
       <div class="space-y-2">
         <div class="flex items-center justify-between text-xs text-slate-600">
           <span class="font-semibold">反向转发 (-R)</span>
-          <button type="button" class="btn btn-secondary btn-xxs" data-action="add-reverse">新增</button>
+          <button type="button" class="px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white/80 text-slate-800 hover:border-indigo-200 hover:text-indigo-700 transition duration-150" data-action="add-reverse">新增</button>
         </div>
         <div class="space-y-2" data-list="reverse_forwards"></div>
       </div>
