@@ -3,9 +3,12 @@
 <div class="card" data-page="dashboard">
   <div class="card-title flex items-center justify-between">
     <span>Containers</span>
-    <button id="dash-refresh" class="btn btn-secondary text-xs">Refresh</button>
+    <div class="flex items-center gap-2">
+      <input id="container-filter" type="text" placeholder="Filter by name" class="input input-sm" />
+      <button id="dash-refresh" class="btn btn-secondary text-xs">Refresh</button>
+    </div>
   </div>
-  <div id="containers-list" class="space-y-3 text-sm"></div>
+  <div id="containers-list" class="grid gap-3 sm:grid-cols-1 md:grid-cols-2 xl:grid-cols-3 text-sm"></div>
 </div>
 <div class="card mt-6">
   <div class="card-title flex items-center justify-between">

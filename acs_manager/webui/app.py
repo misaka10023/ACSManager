@@ -341,6 +341,18 @@ def refresh_ip(container_id: str, user: str = Depends(require_auth)) -> dict:
     return {"ip": ip, "container_ip": ip}
 
 
+@app.post("/containers/{container_id}/restart-container")
+async def restart_container_api(container_id: str, user: str = Depends(require_auth)) -> dict:
+    if multi_manager:
+        await multi_manager.restart_container(container_id)
+    else:
+        mgr = _resolve_manager(container_id)
+        if mgr is None:
+            raise HTTPException(status_code=404, detail="Container not found")
+        await mgr.restart_container()
+    return {"status": "container_restarting"}
+
+
 @app.get("/config")
 def get_config(reload: bool = True, user: str = Depends(require_auth)) -> dict:
     if config_store is None:

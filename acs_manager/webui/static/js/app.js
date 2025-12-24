@@ -24,6 +24,8 @@
   }
 
   // ---------- Dashboard (multi-container) ----------
+  let containersCache = [];
+
   function renderContainers(containers) {
     const listEl = document.getElementById('containers-list');
     if (!listEl) return;
@@ -33,25 +35,27 @@
     }
     const html = containers
       .map((c) => {
-        const name = c.name || c.id || 'unknown';
+        const cid = c.id || c.name || 'unknown';
+        const name = c.name || cid;
         const ip = c.container_ip || 'unknown';
         const status = c.container_status || 'unknown';
         const tunnel = c.tunnel_status || 'stopped';
         const lastSeen = c.last_seen || '';
         return `
-          <div class="p-3 border rounded bg-white shadow-sm">
-            <div class="flex items-center justify-between">
-              <div class="font-semibold">${name}</div>
+          <div class="p-3 border rounded bg-white shadow-sm flex flex-col gap-1">
+            <div class="flex items-center justify-between gap-2">
+              <div class="font-semibold truncate" title="${name}">${name}</div>
               <div class="text-xs text-slate-500">Tunnel: ${tunnel}</div>
             </div>
-            <div class="mt-1 text-xs text-slate-600">Status: ${status}</div>
-            <div class="mt-1 text-xs text-slate-600">IP: <span class="font-mono">${ip}</span></div>
-            ${lastSeen ? `<div class="mt-1 text-xs text-slate-500">Last seen: ${lastSeen}</div>` : ''}
-            <div class="mt-2 flex gap-2 flex-wrap">
-              <button class="btn btn-primary btn-xxs" data-action="refresh" data-id="${c.id}">Refresh IP</button>
-              <button class="btn btn-primary btn-xxs" data-action="restart" data-id="${c.id}">Restart Tunnel</button>
-              <button class="btn btn-secondary btn-xxs" data-action="start" data-id="${c.id}">Start Tunnel</button>
-              <button class="btn btn-secondary btn-xxs" data-action="stop" data-id="${c.id}">Stop Tunnel</button>
+            <div class="text-xs text-slate-600">Status: ${status}</div>
+            <div class="text-xs text-slate-600 truncate">IP: <span class="font-mono">${ip}</span></div>
+            ${lastSeen ? `<div class="text-xs text-slate-500">Last seen: ${lastSeen}</div>` : ''}
+            <div class="mt-2 grid grid-cols-2 gap-2">
+              <button class="btn btn-primary btn-xxs" data-action="refresh" data-id="${cid}">Refresh IP</button>
+              <button class="btn btn-primary btn-xxs" data-action="restart" data-id="${cid}">Restart Tunnel</button>
+              <button class="btn btn-secondary btn-xxs" data-action="start" data-id="${cid}">Start Tunnel</button>
+              <button class="btn btn-secondary btn-xxs" data-action="stop" data-id="${cid}">Stop Tunnel</button>
+              <button class="btn btn-accent btn-xxs col-span-2" data-action="restart-container" data-id="${cid}">Restart Container</button>
             </div>
           </div>
         `;
@@ -60,11 +64,31 @@
     listEl.innerHTML = html;
   }
 
+  function applyContainerFilter() {
+    const input = document.getElementById('container-filter');
+    if (!input) {
+      renderContainers(containersCache);
+      return;
+    }
+    const q = input.value.trim().toLowerCase();
+    if (!q) {
+      renderContainers(containersCache);
+      return;
+    }
+    const filtered = containersCache.filter((c) => {
+      const name = (c.name || c.id || '').toLowerCase();
+      return name.includes(q);
+    });
+    renderContainers(filtered);
+  }
+
   async function loadContainers() {
     try {
       const data = await fetchJSON('/containers');
-      renderContainers(data);
+      containersCache = data || [];
+      applyContainerFilter();
     } catch (e) {
+      containersCache = [];
       renderContainers([]);
       console.error(e);
     }
@@ -76,6 +100,7 @@
       restart: `/containers/${id}/restart`,
       start: `/containers/${id}/start`,
       stop: `/containers/${id}/stop`,
+      'restart-container': `/containers/${id}/restart-container`,
     };
     const url = urlMap[action];
     if (!url) return;
@@ -123,6 +148,13 @@
             alert(`Action failed: ${err}`);
           });
         }
+      });
+    }
+
+    const filterInput = document.getElementById('container-filter');
+    if (filterInput) {
+      filterInput.addEventListener('input', () => {
+        applyContainerFilter();
       });
     }
 
