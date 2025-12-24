@@ -55,6 +55,7 @@
 - **配置管理 (`acs_manager.config`)**
   - 支持 YAML / JSON；使用 `ConfigStore` 做线程安全缓存和原子写入。
   - Web UI 与主程序通过同一个 `ConfigStore` 协同，始终操作同一份配置文件。
+  - 配置包含 `config_version`；版本缺失或与模板不一致时，会把旧文件复制到 `config/old/<name>.old`，再用模板重建并自动合并原有字段。
 
 - **日志**
   - 日志写入：`logs/YYYY-MM-DD.log` + 控制台输出。
