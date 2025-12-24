@@ -14,7 +14,7 @@ class ContainerScopedStore:
 
     @staticmethod
     def _compact_container(container: Dict[str, Any], base_acs: Dict[str, Any]) -> Dict[str, Any]:
-        """Keep only name, minimal acs (container_name/service_type), ssh, and restart policy."""
+        """Keep only name, minimal acs (container_name/service_type), ssh, and restart strategy."""
         name = container.get("name") or container.get("id")
         c_acs = container.get("acs", {}) if isinstance(container.get("acs"), dict) else {}
         compact_acs: Dict[str, Any] = {
@@ -24,9 +24,8 @@ class ContainerScopedStore:
         ssh = container.get("ssh", {}) if isinstance(container.get("ssh"), dict) else {}
         restart_cfg = container.get("restart", {}) if isinstance(container.get("restart"), dict) else {}
         restart_clean: Dict[str, Any] = {}
-        for key in ("strategy", "create_count", "last_created_at", "last_created_name"):
-            if key in restart_cfg:
-                restart_clean[key] = restart_cfg.get(key)
+        if restart_cfg.get("strategy"):
+            restart_clean["strategy"] = restart_cfg.get("strategy")
         payload: Dict[str, Any] = {"name": name, "acs": compact_acs, "ssh": ssh}
         if restart_clean:
             payload["restart"] = restart_clean
@@ -67,17 +66,8 @@ class ContainerScopedStore:
         merged["acs"] = merged_acs
         merged["ssh"] = container.get("ssh", {})
         restart_cfg = container.get("restart", {}) if isinstance(container.get("restart"), dict) else {}
-        strategy = (restart_cfg.get("strategy") or "restart")
-        create_count = restart_cfg.get("create_count") or 0
-        try:
-            create_count = int(create_count)
-        except Exception:
-            create_count = 0
         merged["restart"] = {
-            "strategy": strategy,
-            "create_count": create_count,
-            "last_created_at": restart_cfg.get("last_created_at"),
-            "last_created_name": restart_cfg.get("last_created_name"),
+            "strategy": (restart_cfg.get("strategy") or "restart"),
         }
         return merged
 
@@ -125,7 +115,7 @@ class ContainerScopedStore:
                 updated = dict(item)
                 updated.update(changes)
                 if change_restart is not None:
-                    updated["restart"] = change_restart
+                    updated["restart"] = {"strategy": change_restart.get("strategy")} if isinstance(change_restart, dict) else {}
                 compact = self._compact_container(updated, base_acs)
                 new_containers.append(compact)
                 found = True
@@ -172,7 +162,7 @@ class ContainerScopedStore:
                 if "name" not in new_data:
                     new_data["name"] = self.container_id
                 if restart_delta is not None:
-                    new_data["restart"] = restart_delta
+                    new_data["restart"] = {"strategy": restart_delta.get("strategy")} if isinstance(restart_delta, dict) else {}
                 new_containers.append(self._compact_container(new_data, base_acs))
                 replaced = True
             else:
@@ -182,7 +172,7 @@ class ContainerScopedStore:
             if "name" not in new_data:
                 new_data["name"] = self.container_id
             if restart_delta is not None:
-                new_data["restart"] = restart_delta
+                new_data["restart"] = {"strategy": restart_delta.get("strategy")} if isinstance(restart_delta, dict) else {}
             new_containers.append(self._compact_container(new_data, base_acs))
         root["acs"] = base_acs
         root["containers"] = new_containers

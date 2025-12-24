@@ -1,6 +1,6 @@
 # ACS Manager 多容器配置示例（含中文注释）
 
-config_version: 2                      # ??????????????????
+config_version: 2                      # ????????????????
 
 # 全局 ACS 配置：所有容器共享，可在容器级覆盖 acs 字段
 acs:
@@ -22,7 +22,6 @@ containers:
       service_type: "container"           # container|notebook；notebook 模式需填写 ssh.container_ip
     restart:
       strategy: "restart"                # restart|recreate?recreate ?????_??_???????
-      create_count: 0                     # ???????????????
     ssh:
       mode: "jump"                        # direct|jump|double SSH 模式
       bastion_host: ""                    # 跳板/远程服务器 IP（direct 可空）

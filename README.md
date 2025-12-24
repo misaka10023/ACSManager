@@ -56,6 +56,7 @@
   - 支持 YAML / JSON；使用 `ConfigStore` 做线程安全缓存和原子写入。
   - Web UI 与主程序通过同一个 `ConfigStore` 协同，始终操作同一份配置文件。
   - 配置包含 `config_version`；版本缺失或与模板不一致时，会把旧文件复制到 `config/old/<name>.old`，再用模板重建并自动合并原有字段。
+  - 运行态、非人工可编辑的数据（如重建次数等）存放在 `state/runtime_state.yaml`，与配置文件分离。
 
 - **日志**
   - 日志写入：`logs/YYYY-MM-DD.log` + 控制台输出。
@@ -276,7 +277,7 @@ curl -X PATCH http://localhost:8000/config \
 - 每个容器都可以配置自己的端口、转发、登录方式、fallback `ssh.container_ip`；发现新 IP 时会写回对应容器的 `ssh.container_ip` 便于下次直连。
 - 若老配置仍是单一 `acs`/`ssh` 段，会自动视为一个容器。
 - `acs.service_type`：`container`（默认）或 `notebook`。`notebook` 仅使用 detail 接口，无法通过 API 解析 IP，必须填好对应容器的 `ssh.container_ip` 才能启隧道。
-- ?????`restart.strategy` ?? `restart`??????????? `recreate`????????? `???_??_???`??`restart.create_count` ?????????????
+- 重启策略：`restart.strategy` 可选 `restart`（默认，重启原任务）或 `recreate`（新建任务，命名为 `名称_次数_时间戳`）；新建计数/时间戳存于本地 state 文件，用户无需手动修改。
 
 ### `acs` 段
 

@@ -3,6 +3,7 @@ temp.txt
 temp_workspace/
 config/local/
 config/old/
+state/
 config/settings.yaml
 .idea/
 .venv/

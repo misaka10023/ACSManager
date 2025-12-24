@@ -14,6 +14,7 @@ import psutil
 
 from acs_manager.config.store import ConfigStore
 from acs_manager.container.client import ContainerClient
+from acs_manager.config.state_store import RuntimeStateStore
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +29,13 @@ class ContainerManager:
         *,
         container_id: str = "default",
         display_name: Optional[str] = None,
+        state_store: Optional[RuntimeStateStore] = None,
     ) -> None:
         self.store = store
         self.container_id = container_id
         self.display_name = display_name or container_id
         self.container_client = container_client or ContainerClient(store)
+        self.state_store = state_store
         self.state: Dict[str, Any] = {
             "id": self.container_id,
             "name": self.display_name,
@@ -876,10 +879,23 @@ done
     def _ssh_cfg(self, *, reload: bool = False) -> Dict[str, Any]:
         return self.store.get_section("ssh", default={}, reload=reload)
 
+    def bind_state_store(self, state_store: RuntimeStateStore) -> None:
+        """Attach external runtime state store (for non-config data)."""
+        self.state_store = state_store
+
+    def _restart_state(self) -> Dict[str, Any]:
+        if not self.state_store:
+            return {}
+        try:
+            return self.state_store.read_container(self.container_id)
+        except Exception:
+            return {}
+
     def _restart_cfg(self, *, reload: bool = False) -> Dict[str, Any]:
         cfg = self.store.get_section("restart", default={}, reload=reload)
         strategy = (cfg.get("strategy") or "restart").lower()
-        create_count = cfg.get("create_count") or 0
+        state = self._restart_state()
+        create_count = state.get("create_count") or 0
         try:
             create_count = int(create_count)
         except Exception:
@@ -887,12 +903,21 @@ done
         return {
             "strategy": strategy,
             "create_count": create_count,
-            "last_created_at": cfg.get("last_created_at"),
-            "last_created_name": cfg.get("last_created_name"),
+            "last_created_at": state.get("last_created_at"),
+            "last_created_name": state.get("last_created_name"),
         }
 
     def _persist_restart_cfg(self, cfg: Dict[str, Any]) -> None:
+        if not self.state_store:
+            return
         try:
-            self.store.update({"restart": cfg})
+            self.state_store.update_container(
+                self.container_id,
+                {
+                    "create_count": cfg.get("create_count"),
+                    "last_created_at": cfg.get("last_created_at"),
+                    "last_created_name": cfg.get("last_created_name"),
+                },
+            )
         except Exception as exc:
-            logger.warning("Failed to persist restart config: %s", exc)
+            logger.warning("Failed to persist restart state: %s", exc)
