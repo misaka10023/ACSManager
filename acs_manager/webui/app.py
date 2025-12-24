@@ -269,6 +269,48 @@ def list_containers(user: str = Depends(require_auth)) -> list[dict]:
     raise HTTPException(status_code=503, detail="Manager not wired to web UI yet")
 
 
+def _any_container_client() -> ContainerManager:
+    """
+    Pick a container manager to serve ACS queries (tasks list, etc.).
+    """
+    if multi_manager and multi_manager.managers:
+        # pick the first manager
+        mgr = next(iter(multi_manager.managers.values()))
+        return mgr
+    if manager:
+        return manager
+    raise HTTPException(status_code=503, detail="Manager not wired to web UI yet")
+
+
+@app.get("/acs/tasks")
+def list_acs_tasks(user: str = Depends(require_auth)) -> dict:
+    """
+    Return ACS task list for suggestions (name/status/id).
+    """
+    mgr = _any_container_client()
+    try:
+        resp = mgr.container_client.list_tasks(start=0, limit=200, sort="DESC")
+        items = resp.get("data") if isinstance(resp, dict) else []
+        tasks = []
+        for item in items or []:
+            name = item.get("instanceServiceName") or item.get("name")
+            if not name:
+                continue
+            tasks.append(
+                {
+                    "name": name,
+                    "status": item.get("status"),
+                    "id": item.get("instanceServiceId") or item.get("id"),
+                }
+            )
+        return {"tasks": tasks}
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - network
+        logger.error("Failed to list ACS tasks: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to list ACS tasks")
+
+
 @app.get("/container-ip")
 def container_ip(container_id: Optional[str] = Query(None)) -> dict:
     mgr = _resolve_manager(container_id)

@@ -25,6 +25,27 @@
 
   // ---------- Dashboard (multi-container) ----------
   let containersCache = [];
+  let tasksCache = [];
+
+  function populateTaskDatalist(list) {
+    const datalist = document.getElementById('acs-task-options');
+    if (!datalist) return;
+    datalist.innerHTML = (list || [])
+      .map((t) => `<option value="${t.name}">${t.name}${t.status ? ` (${t.status})` : ''}</option>`)
+      .join('');
+  }
+
+  async function loadTasks() {
+    try {
+      const resp = await fetchJSON('/acs/tasks');
+      tasksCache = resp.tasks || [];
+      populateTaskDatalist(tasksCache);
+    } catch (e) {
+      tasksCache = [];
+      populateTaskDatalist([]);
+      console.error('Failed to load ACS tasks', e);
+    }
+  }
 
   function renderContainers(containers) {
     const listEl = document.getElementById('containers-list');
@@ -306,7 +327,7 @@
           <input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="name" value="${container.name || ''}">
         </label>
         <label class="flex flex-col gap-1 text-xs text-slate-600">ACS 容器名
-          <input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="container_name" value="${(container.acs && container.acs.container_name) || ''}">
+          <input type="text" list="acs-task-options" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="container_name" value="${(container.acs && container.acs.container_name) || ''}">
         </label>
         <label class="flex flex-col gap-1 text-xs text-slate-600">重启策略
           <select class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="restart_strategy">
@@ -475,6 +496,7 @@
     const listEl = document.getElementById('container-form-list');
     if (listEl) listEl.innerHTML = '';
     containers.forEach((c, idx) => renderContainerCard(c, idx));
+    populateTaskDatalist(tasksCache);
   }
 
   async function loadConfig() {
@@ -553,7 +575,7 @@
   }
 
   function initConfig() {
-    loadConfig();
+    loadTasks().finally(() => loadConfig());
     bindContainerActions();
     const btnLoad = document.getElementById('cfg-load');
     const btnSave = document.getElementById('cfg-save');
