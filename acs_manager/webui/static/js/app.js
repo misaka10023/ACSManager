@@ -53,11 +53,11 @@
             ${remaining ? `<div class="text-xs text-slate-600">剩余时间: ${remaining}</div>` : ''}
             ${lastSeen ? `<div class="text-xs text-slate-500">Last seen: ${lastSeen}</div>` : ''}
             <div class="mt-2 grid grid-cols-2 gap-2 text-[13px]">
-              <button class="btn btn-primary btn-xxs" data-action="refresh" data-id="${cid}">Refresh IP</button>
-              <button class="btn btn-primary btn-xxs" data-action="restart" data-id="${cid}">Restart Tunnel</button>
-              <button class="btn btn-secondary btn-xxs" data-action="start" data-id="${cid}">Start Tunnel</button>
-              <button class="btn btn-secondary btn-xxs" data-action="stop" data-id="${cid}">Stop Tunnel</button>
-              <button class="btn btn-secondary btn-xxs col-span-2" data-action="restart-container" data-id="${cid}">Restart Container</button>
+              <button class="btn btn-primary btn-xxs" data-action="refresh" data-id="${cid}">刷新 IP</button>
+              <button class="btn btn-primary btn-xxs" data-action="restart" data-id="${cid}">重启隧道</button>
+              <button class="btn btn-secondary btn-xxs" data-action="start" data-id="${cid}">启动隧道</button>
+              <button class="btn btn-secondary btn-xxs" data-action="stop" data-id="${cid}">停止隧道</button>
+              <button class="btn btn-secondary btn-xxs col-span-2" data-action="restart-container" data-id="${cid}">重启容器</button>
             </div>
           </div>
         `;

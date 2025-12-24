@@ -20,13 +20,13 @@
           </div>
         </div>
         <nav class="flex gap-2 text-sm font-medium">
-          <a href="{{ request.url_for('ui_dashboard') }}" class="nav-link" data-page="dashboard">Dashboard</a>
-          <a href="{{ request.url_for('ui_config') }}" class="nav-link" data-page="config">Config</a>
-          <a href="{{ request.url_for('ui_logs') }}" class="nav-link" data-page="logs">Logs</a>
+          <a href="{{ request.url_for('ui_dashboard') }}" class="nav-link" data-page="dashboard">仪表盘</a>
+          <a href="{{ request.url_for('ui_config') }}" class="nav-link" data-page="config">配置</a>
+          <a href="{{ request.url_for('ui_logs') }}" class="nav-link" data-page="logs">日志</a>
           {% if auth_enabled and is_authenticated %}
-            <a href="{{ request.url_for('ui_logout') }}" class="nav-link" data-page="logout">Logout</a>
+            <a href="{{ request.url_for('ui_logout') }}" class="nav-link" data-page="logout">退出</a>
           {% elif auth_enabled and page != 'login' %}
-            <a href="{{ request.url_for('ui_login') }}" class="nav-link" data-page="login">Login</a>
+            <a href="{{ request.url_for('ui_login') }}" class="nav-link" data-page="login">登录</a>
           {% endif %}
         </nav>
       </div>
