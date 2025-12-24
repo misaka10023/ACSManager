@@ -1,196 +1,134 @@
 {% extends "base.html" %}
 {% block content %}
-<style>
-  body[data-page="config"] main { max-width: 100%; padding: 0; }
-  .config-bg {
-    position: fixed;
-    inset: 0;
-    background:
-      radial-gradient(120% 90% at 20% 20%, rgba(79, 70, 229, 0.30), transparent),
-      radial-gradient(100% 80% at 80% 10%, rgba(59, 130, 246, 0.25), transparent),
-      radial-gradient(140% 120% at 50% 80%, rgba(14, 165, 233, 0.18), rgba(15, 23, 42, 0.75));
-    pointer-events: none;
-    z-index: 0;
-  }
-  .config-bg::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background-image:
-      linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
-    background-size: 32px 32px, 32px 32px;
-    opacity: 0.35;
-    mix-blend-mode: soft-light;
-  }
-  .card-neo {
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    animation: fadeIn 180ms ease;
-  }
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-</style>
-
-<div class="relative min-h-screen overflow-hidden" data-page="config">
-  <div class="config-bg"></div>
-
-  <div class="relative z-10 flex items-center justify-center px-4 py-10 sm:py-14">
-    <div class="w-full max-w-5xl">
-      <div class="card-neo w-full rounded-3xl border border-white/60 bg-white/80 shadow-2xl shadow-slate-900/10 p-6 sm:p-8 md:p-10 space-y-8">
-        <div class="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 class="text-2xl font-semibold text-slate-900">配置修改</h1>
-            <p class="text-sm text-slate-600 mt-1">UTF-8 配置；root_path 与反代前缀一致；使用 password_hash 时请清空 password；转发格式 <code>本地:远端</code> 或 <code>本地:远端:中间端口</code>。</p>
-          </div>
-          <div class="flex gap-3">
-            <button id="cfg-load" class="px-4 py-2 rounded-xl border border-indigo-200 bg-white/70 text-indigo-700 hover:bg-white transition duration-200 shadow-sm">重新载入</button>
-            <button id="cfg-save" class="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-sky-500 text-white font-medium shadow-lg shadow-indigo-500/30 hover:shadow-indigo-500/40 hover:-translate-y-0.5 transition duration-200">保存配置</button>
-          </div>
-        </div>
-
-        <div class="space-y-6">
-          <!-- Account / ACS -->
-          <section class="rounded-2xl border border-white/70 bg-white/70 p-5 shadow-sm shadow-slate-900/5 space-y-4">
-            <div>
-              <div class="text-sm font-semibold text-slate-900">Account</div>
-              <div class="text-[12px] text-slate-500">全局 ACS（登录 / 公钥 / Cookies）</div>
-            </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <label class="flex flex-col gap-1">
-                <span class="text-xs text-slate-600 flex items-center gap-1">Base URL<span class="text-[11px] text-slate-400" title="含协议与端口，如 http://192.168.10.200:6080">ⓘ</span></span>
-                <input id="acs-base-url" type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" placeholder="http://192.168.10.200:6080">
-              </label>
-              <label class="flex flex-col gap-1">
-                <span class="text-xs text-slate-600 flex items-center gap-1">API 前缀<span class="text-[11px] text-slate-400" title="默认 /sothisai">ⓘ</span></span>
-                <input id="acs-api-prefix" type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" placeholder="/sothisai">
-              </label>
-              <label class="flex flex-col gap-1">
-                <span class="text-xs text-slate-600">登录用户</span>
-                <input id="acs-login-user" type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" placeholder="必填">
-              </label>
-              <label class="flex flex-col gap-1">
-                <span class="text-xs text-slate-600">登录密码</span>
-                <input id="acs-login-password" type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" placeholder="必填">
-              </label>
-              <label class="flex flex-col gap-1">
-                <span class="text-xs text-slate-600">用户类型</span>
-                <input id="acs-user-type" type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" placeholder="os">
-              </label>
-              <label class="flex flex-col gap-1">
-                <span class="text-xs text-slate-600 flex items-center gap-1">公钥(Base64)<span class="text-[11px] text-slate-400" title="用于加密密码，可留空">ⓘ</span></span>
-                <input id="acs-public-key" type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" placeholder="可选，用于加密密码">
-              </label>
-              <label class="flex items-center gap-2 text-xs text-slate-600">
-                <input id="acs-verify-ssl" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-200">
-                验证 SSL
-              </label>
-              <label class="flex flex-col gap-1">
-                <span class="text-xs text-slate-600 flex items-center gap-1">JSESSIONID<span class="text-[11px] text-slate-400" title="可选，预置登录态">ⓘ</span></span>
-                <input id="acs-cookie-jsessionid" type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" placeholder="可空">
-              </label>
-              <label class="flex flex-col gap-1">
-                <span class="text-xs text-slate-600">GV_JSESSIONID</span>
-                <input id="acs-cookie-gv" type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" placeholder="可空">
-              </label>
-            </div>
-          </section>
-
-          <!-- Network + Security -->
-          <section class="rounded-2xl border border-white/70 bg-white/70 p-5 shadow-sm shadow-slate-900/5 space-y-5">
-            <div class="space-y-3">
-              <div class="flex items-center justify-between">
-                <div>
-                  <div class="text-sm font-semibold text-slate-900">Network</div>
-                  <div class="text-[12px] text-slate-500">Web UI 网络入口</div>
-                </div>
-              </div>
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <label class="flex flex-col gap-1">
-                  <span class="text-xs text-slate-600">Host</span>
-                  <input id="webui-host" type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" placeholder="0.0.0.0">
-                </label>
-                <label class="flex flex-col gap-1">
-                  <span class="text-xs text-slate-600">Port</span>
-                  <input id="webui-port" type="number" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" placeholder="8000">
-                </label>
-                <label class="flex flex-col gap-1">
-                  <span class="text-xs text-slate-600 flex items-center gap-1">Root Path<span class="text-[11px] text-slate-400" title="与反代前缀一致">ⓘ</span></span>
-                  <input id="webui-root-path" type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" placeholder="/acsmanager">
-                </label>
-              </div>
-            </div>
-
-            <div class="space-y-3">
-              <div class="flex items-center justify-between">
-                <div>
-                  <div class="text-sm font-semibold text-slate-900">Security</div>
-                  <div class="text-[12px] text-slate-500">Web UI 登录与会话</div>
-                </div>
-                <div class="text-[11px] text-slate-500">使用 password_hash 时清空 password</div>
-              </div>
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <label class="flex items-center gap-2 text-xs text-slate-600">
-                  <input id="auth-enabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-200">
-                  启用登录
-                </label>
-                <label class="flex flex-col gap-1">
-                  <span class="text-xs text-slate-600">用户名</span>
-                  <input id="auth-username" type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" placeholder="admin">
-                </label>
-                <label class="flex flex-col gap-1">
-                  <span class="text-xs text-slate-600">密码</span>
-                  <input id="auth-password" type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" placeholder="change-me">
-                </label>
-                <label class="flex flex-col gap-1">
-                  <span class="text-xs text-slate-600 flex items-center gap-1">密码哈希<span class="text-[11px] text-slate-400" title="填写 hash 时请清空密码">ⓘ</span></span>
-                  <input id="auth-password-hash" type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" placeholder="sha256">
-                </label>
-                <label class="flex flex-col gap-1">
-                  <span class="text-xs text-slate-600">Secret Key</span>
-                  <input id="auth-secret-key" type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" placeholder="change-me-please">
-                </label>
-                <label class="flex flex-col gap-1">
-                  <span class="text-xs text-slate-600">Session TTL(秒)</span>
-                  <input id="auth-session-ttl" type="number" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" placeholder="43200">
-                </label>
-              </div>
-            </div>
-          </section>
-
-          <!-- Observability -->
-          <section class="rounded-2xl border border-white/70 bg-white/70 p-5 shadow-sm shadow-slate-900/5 space-y-3">
-            <div>
-              <div class="text-sm font-semibold text-slate-900">Observability</div>
-              <div class="text-[12px] text-slate-500">日志级别</div>
-            </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <label class="flex flex-col gap-1">
-                <span class="text-xs text-slate-600">Level</span>
-                <input id="log-level" type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" placeholder="INFO">
-              </label>
-            </div>
-          </section>
-
-          <!-- Containers -->
-          <section class="rounded-2xl border border-white/70 bg-white/70 p-5 shadow-sm shadow-slate-900/5 space-y-4">
-            <div class="flex items-center justify-between gap-3">
-              <div>
-                <div class="text-sm font-semibold text-slate-900">Containers</div>
-                <div class="text-[12px] text-slate-500">ACS 名称、重启策略、SSH 与转发</div>
-              </div>
-              <button id="container-add" class="px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white/80 text-slate-800 hover:border-indigo-200 hover:text-indigo-700 transition duration-200 shadow-sm">添加容器</button>
-            </div>
-            <p class="text-xs text-slate-500">容器名、ACS 容器名必填；端口转发按行填写。</p>
-            <div id="container-form-list" class="space-y-3"></div>
-          </section>
-        </div>
-
-        <div id="cfg-status" class="text-sm text-slate-700"></div>
+<div class="space-y-6" data-page="config">
+  <div class="card p-6 lg:p-8 shadow-2xl shadow-indigo-500/15">
+    <div class="flex flex-wrap items-start justify-between gap-4 mb-4">
+      <div>
+        <h1 class="text-xl font-semibold text-slate-900">配置修改</h1>
+        <p class="text-sm text-slate-600 mt-1">UTF-8 配置；root_path 与反代前缀一致；使用 password_hash 时清空 password；转发格式 <code>本地:远端</code> 或 <code>本地:远端:中间端口</code>。</p>
+      </div>
+      <div class="flex gap-3">
+        <button id="cfg-load" class="btn btn-secondary">重新载入</button>
+        <button id="cfg-save" class="btn btn-primary">保存配置</button>
       </div>
     </div>
+
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+      <!-- Account / ACS -->
+      <section class="card-section space-y-3">
+        <div>
+          <div class="text-sm font-semibold text-slate-900">Account</div>
+          <div class="text-[12px] text-slate-500">全局 ACS（登录 / 公钥 / Cookies）</div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <label class="flex flex-col gap-1 text-xs text-slate-600">Base URL
+            <input id="acs-base-url" type="text" class="input" placeholder="http://192.168.10.200:6080">
+          </label>
+          <label class="flex flex-col gap-1 text-xs text-slate-600">API 前缀
+            <input id="acs-api-prefix" type="text" class="input" placeholder="/sothisai">
+          </label>
+          <label class="flex flex-col gap-1 text-xs text-slate-600">登录用户
+            <input id="acs-login-user" type="text" class="input" placeholder="必填">
+          </label>
+          <label class="flex flex-col gap-1 text-xs text-slate-600">登录密码
+            <input id="acs-login-password" type="text" class="input" placeholder="必填">
+          </label>
+          <label class="flex flex-col gap-1 text-xs text-slate-600">用户类型
+            <input id="acs-user-type" type="text" class="input" placeholder="os">
+          </label>
+          <label class="flex flex-col gap-1 text-xs text-slate-600">公钥(Base64)
+            <input id="acs-public-key" type="text" class="input" placeholder="可选，用于加密密码">
+          </label>
+          <label class="flex items-center gap-2 text-xs text-slate-600">
+            <input id="acs-verify-ssl" type="checkbox" class="checkbox">
+            验证 SSL
+          </label>
+          <label class="flex flex-col gap-1 text-xs text-slate-600">JSESSIONID
+            <input id="acs-cookie-jsessionid" type="text" class="input" placeholder="可空">
+          </label>
+          <label class="flex flex-col gap-1 text-xs text-slate-600">GV_JSESSIONID
+            <input id="acs-cookie-gv" type="text" class="input" placeholder="可空">
+          </label>
+        </div>
+      </section>
+
+      <!-- Network + Security -->
+      <section class="card-section space-y-4">
+        <div class="space-y-1">
+          <div class="text-sm font-semibold text-slate-900">Network</div>
+          <div class="text-[12px] text-slate-500">Web UI 网络入口</div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <label class="flex flex-col gap-1 text-xs text-slate-600">Host
+            <input id="webui-host" type="text" class="input" placeholder="0.0.0.0">
+          </label>
+          <label class="flex flex-col gap-1 text-xs text-slate-600">Port
+            <input id="webui-port" type="number" class="input" placeholder="8000">
+          </label>
+          <label class="flex flex-col gap-1 text-xs text-slate-600">Root Path
+            <input id="webui-root-path" type="text" class="input" placeholder="/acsmanager">
+          </label>
+        </div>
+
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-sm font-semibold text-slate-900">Security</div>
+              <div class="text-[12px] text-slate-500">Web UI 登录与会话（使用 password_hash 时清空 password）</div>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <label class="flex items-center gap-2 text-xs text-slate-600">
+              <input id="auth-enabled" type="checkbox" class="checkbox">
+              启用登录
+            </label>
+            <label class="flex flex-col gap-1 text-xs text-slate-600">用户名
+              <input id="auth-username" type="text" class="input" placeholder="admin">
+            </label>
+            <label class="flex flex-col gap-1 text-xs text-slate-600">密码
+              <input id="auth-password" type="text" class="input" placeholder="change-me">
+            </label>
+            <label class="flex flex-col gap-1 text-xs text-slate-600">密码哈希
+              <input id="auth-password-hash" type="text" class="input" placeholder="sha256">
+            </label>
+            <label class="flex flex-col gap-1 text-xs text-slate-600">Secret Key
+              <input id="auth-secret-key" type="text" class="input" placeholder="change-me-please">
+            </label>
+            <label class="flex flex-col gap-1 text-xs text-slate-600">Session TTL(秒)
+              <input id="auth-session-ttl" type="number" class="input" placeholder="43200">
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Observability -->
+      <section class="card-section space-y-2">
+        <div>
+          <div class="text-sm font-semibold text-slate-900">Observability</div>
+          <div class="text-[12px] text-slate-500">日志级别</div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <label class="flex flex-col gap-1 text-xs text-slate-600">Level
+            <input id="log-level" type="text" class="input" placeholder="INFO">
+          </label>
+        </div>
+      </section>
+
+      <!-- Containers -->
+      <section class="card-section space-y-3 xl:col-span-2">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-sm font-semibold text-slate-900">Containers</div>
+            <div class="text-[12px] text-slate-500">ACS 名称、重启策略、SSH 与转发</div>
+          </div>
+          <button id="container-add" class="btn btn-secondary btn-xxs">添加容器</button>
+        </div>
+        <p class="text-xs text-slate-500">容器名、ACS 容器名必填；端口转发按行填写。</p>
+        <div id="container-form-list" class="space-y-3"></div>
+      </section>
+    </div>
+
+    <div id="cfg-status" class="text-sm text-slate-700 mt-4"></div>
   </div>
 </div>
 {% endblock %}

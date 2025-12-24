@@ -42,20 +42,20 @@
         const tunnel = c.tunnel_status || 'stopped';
         const lastSeen = c.last_seen || '';
         return `
-          <div class="p-3 border rounded bg-white shadow-sm flex flex-col gap-1">
+          <div class="rounded-2xl border border-white/60 bg-white/80 shadow-sm shadow-slate-900/10 p-4 flex flex-col gap-2">
             <div class="flex items-center justify-between gap-2">
-              <div class="font-semibold truncate" title="${name}">${name}</div>
+              <div class="font-semibold truncate text-slate-900" title="${name}">${name}</div>
               <div class="text-xs text-slate-500">Tunnel: ${tunnel}</div>
             </div>
             <div class="text-xs text-slate-600">Status: ${status}</div>
             <div class="text-xs text-slate-600 truncate">IP: <span class="font-mono">${ip}</span></div>
             ${lastSeen ? `<div class="text-xs text-slate-500">Last seen: ${lastSeen}</div>` : ''}
-            <div class="mt-2 grid grid-cols-2 gap-2">
+            <div class="mt-2 grid grid-cols-2 gap-2 text-[13px]">
               <button class="btn btn-primary btn-xxs" data-action="refresh" data-id="${cid}">Refresh IP</button>
               <button class="btn btn-primary btn-xxs" data-action="restart" data-id="${cid}">Restart Tunnel</button>
               <button class="btn btn-secondary btn-xxs" data-action="start" data-id="${cid}">Start Tunnel</button>
               <button class="btn btn-secondary btn-xxs" data-action="stop" data-id="${cid}">Stop Tunnel</button>
-              <button class="btn btn-accent btn-xxs col-span-2" data-action="restart-container" data-id="${cid}">Restart Container</button>
+              <button class="btn btn-secondary btn-xxs col-span-2" data-action="restart-container" data-id="${cid}">Restart Container</button>
             </div>
           </div>
         `;

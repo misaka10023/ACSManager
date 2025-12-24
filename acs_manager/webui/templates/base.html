@@ -7,32 +7,39 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="{{ url_for('static', path='css/main.css') }}" />
 </head>
-<body class="bg-slate-50 text-slate-900" data-page="{{ page|default('') }}" data-base-path="{{ request.scope.get('root_path', '') }}">
-  <header class="bg-white shadow-sm">
-    <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-      <div class="text-xl font-semibold text-slate-800">ACS Manager</div>
-      <nav class="flex gap-4 text-sm font-medium">
-        <a href="{{ request.url_for('ui_dashboard') }}" class="nav-link" data-page="dashboard">Dashboard</a>
-        <a href="{{ request.url_for('ui_config') }}" class="nav-link" data-page="config">Config</a>
-        <a href="{{ request.url_for('ui_logs') }}" class="nav-link" data-page="logs">Logs</a>
-        {% if auth_enabled and is_authenticated %}
-          <a href="{{ request.url_for('ui_logout') }}" class="nav-link" data-page="logout">Logout</a>
-        {% elif auth_enabled and page != 'login' %}
-          <a href="{{ request.url_for('ui_login') }}" class="nav-link" data-page="login">Login</a>
-        {% endif %}
-      </nav>
-    </div>
-  </header>
-  <main class="max-w-6xl mx-auto px-4 py-8">
-    {% block content %}{% endblock %}
-  </main>
+<body class="app-body text-slate-900" data-page="{{ page|default('') }}" data-base-path="{{ request.scope.get('root_path', '') }}">
+  <div class="app-bg-layer absolute inset-0 pointer-events-none"></div>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="max-w-6xl mx-auto px-5 py-4 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="h-10 w-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-sky-400 shadow-md shadow-indigo-500/30 flex items-center justify-center text-white font-semibold">AC</div>
+          <div>
+            <div class="text-lg font-semibold text-slate-900">ACS Manager</div>
+            <div class="text-xs text-slate-500">SaaS 控制台</div>
+          </div>
+        </div>
+        <nav class="flex gap-2 text-sm font-medium">
+          <a href="{{ request.url_for('ui_dashboard') }}" class="nav-link" data-page="dashboard">Dashboard</a>
+          <a href="{{ request.url_for('ui_config') }}" class="nav-link" data-page="config">Config</a>
+          <a href="{{ request.url_for('ui_logs') }}" class="nav-link" data-page="logs">Logs</a>
+          {% if auth_enabled and is_authenticated %}
+            <a href="{{ request.url_for('ui_logout') }}" class="nav-link" data-page="logout">Logout</a>
+          {% elif auth_enabled and page != 'login' %}
+            <a href="{{ request.url_for('ui_login') }}" class="nav-link" data-page="login">Login</a>
+          {% endif %}
+        </nav>
+      </div>
+    </header>
+
+    <main class="app-main">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
   <script>
     document.querySelectorAll(".nav-link").forEach((link) => {
-      if (link.dataset.page === "{{ page|default('') }}") {
-        link.classList.add("text-indigo-600");
-      } else {
-        link.classList.add("text-slate-600", "hover:text-slate-900");
-      }
+      const isActive = link.dataset.page === "{{ page|default('') }}";
+      link.classList.toggle("nav-link-active", isActive);
     });
   </script>
   <script src="{{ url_for('static', path='js/app.js') }}"></script>
