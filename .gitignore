@@ -7,6 +7,7 @@ config/settings.yaml
 .venv/
 __pycache__/
 logs/
+AGENTS.md
 
 # IntelliJ IDEA local files (merged from .idea/.gitignore)
 /shelf/
