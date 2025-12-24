@@ -1,41 +1,41 @@
-# ACS Manager ??????????????
+# ACS Manager 多容器配置示例（含中文注释）
 
-config_version: 2                      # ????????????????
+config_version: 2                      # 配置文件版本，版本变更时自动迁移
 
-# ?? ACS ????????????????? acs ??
+# 全局 ACS 配置：所有容器共享，可在容器级覆盖 acs 字段
 acs:
-  base_url: "http://192.168.10.200:6080"  # ACS ???????????????
-  api_prefix: "/sothisai"                 # ACS API ????? /sothisai
-  login_user: "your-acs-username"         # ACS ?????
-  login_password: "change-me"             # ACS ???????????
-  user_type: "os"                         # ???????? os/gridview?
-  public_key: ""                          # ???????? Base64 ??
-  verify_ssl: false                       # ??????? false ????
-  cookies:                                # ?? cookies????????
+  base_url: "http://192.168.10.200:6080"  # ACS 控制台基础地址（含协议和端口）
+  api_prefix: "/sothisai"                 # ACS API 前缀，默认 /sothisai
+  login_user: "your-acs-username"         # ACS 登录用户名
+  login_password: "change-me"             # ACS 登录密码（生产请修改）
+  user_type: "os"                         # 登录用户类型（如 os/gridview）
+  public_key: ""                          # 登录密码加密用的 Base64 公钥
+  verify_ssl: false                       # 自签证书可设为 false 关闭校验
+  cookies:                                # 预置 cookies；非空时跳过登录
     JSESSIONID: ""
     GV_JSESSIONID: ""
 
 containers:
-  - name: "E2SRLF"                        # ????+?????????
+  - name: "E2SRLF"                        # 唯一标识+展示名称（自定义）
     acs:
-      container_name: "E2SRLF"            # ? ACS ????????/???
-      service_type: "container"           # container|notebook?notebook ????? ssh.container_ip
+      container_name: "E2SRLF"            # 在 ACS 任务列表中的容器/任务名
+      service_type: "container"           # container|notebook；notebook 模式需填写 ssh.container_ip
     restart:
-      strategy: "restart"                # restart|recreate?recreate ?????_??_???????
+      strategy: "restart"                # restart|recreate，recreate 时按“名称_次数_时间”新建任务
     ssh:
-      mode: "jump"                        # direct|jump|double SSH ??
-      bastion_host: ""                    # ??/????? IP?direct ???
-      bastion_user: ""                    # ???????direct ???
-      target_user: "root"                 # ?????????
-      port: 22                            # ?? SSH ??
-      container_port: 22                  # ?? SSH ???double ????
-      password_login: false               # true ?????false ????
-      password: ""                        # ??????????? password_login?
-      forwards: []                        # ?????? (-L)?????? {"local": 8080, "remote": 80}
-      reverse_forwards: []                # ?????? (-R)??????? "??:??[:????]"?double ????????
-      container_ip: ""                    # ???? IP?notebook ????????? IP ???
+      mode: "jump"                        # direct|jump|double SSH 模式
+      bastion_host: ""                    # 跳板/远程服务器 IP（direct 可空）
+      bastion_user: ""                    # 跳板登录用户（direct 可空）
+      target_user: "root"                 # 容器宿主机登录用户
+      port: 22                            # 外层 SSH 端口
+      container_port: 22                  # 内层 SSH 端口（double 模式用）
+      password_login: false               # true 使用密码；false 使用密钥
+      password: ""                        # 密码登录的密码（若启用 password_login）
+      forwards: []                        # 正向转发列表 (-L)，元素格式如 {"local": 8080, "remote": 80}
+      reverse_forwards: []                # 反向转发列表 (-R)，格式：字典或 "本地:容器[:中间端口]"；double 必须包含中间端口
+      container_ip: ""                    # 可选兜底 IP；notebook 模式必填，解析到新 IP 会写回
 
-# ???????????
+# 可按需继续添加更多容器
 #  - name: "Another"
 #    acs:
 #      container_name: "Another"
@@ -54,16 +54,16 @@ containers:
 #      container_ip: ""
 
 webui:
-  host: "0.0.0.0"                         # Web UI ????
-  port: 8000                              # Web UI ??
-  root_path: ""                           # ????????????? /acsmanager?
+  host: "0.0.0.0"                         # Web UI 绑定地址
+  port: 8000                              # Web UI 端口
+  root_path: ""                           # 部署在子路径时填写前缀（如 /acsmanager）
   auth:
-    enabled: false                        # ??????
-    username: "admin"                     # ?????
-    password: "change-me"                 # ??????????? password_hash?
-    password_hash: ""                     # ???sha256 ???????? password
-    secret_key: "change-me-please"        # ?? session cookie ???
-    session_ttl: 43200                    # ????????
+    enabled: false                        # 是否启用登录
+    username: "admin"                     # 登录用户名
+    password: "change-me"                 # 明文密码（生产建议改用 password_hash）
+    password_hash: ""                     # 可选：sha256 密码，填写后清空 password
+    secret_key: "change-me-please"        # 签名 session cookie 的密钥
+    session_ttl: 43200                    # 会话有效期（秒）
 
 logging:
-  level: INFO                             # ?????DEBUG/INFO/WARNING/ERROR?
+  level: INFO                             # 日志级别（DEBUG/INFO/WARNING/ERROR）
