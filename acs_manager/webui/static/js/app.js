@@ -246,6 +246,46 @@
       .join('\n');
   }
 
+  function renderForwardRow(type, values = {}) {
+    const row = document.createElement('div');
+    row.className = 'grid grid-cols-3 gap-2 items-center text-xs border rounded p-2 bg-slate-50';
+    row.dataset.kind = type;
+    const isReverse = type === 'reverse';
+    row.innerHTML = `
+      <label class="flex flex-col gap-1 text-[11px]">
+        <span>本地端口</span>
+        <input type="number" class="input input-xs" data-field="local" value="${values.local ?? ''}">
+      </label>
+      <label class="flex flex-col gap-1 text-[11px]">
+        <span>容器端口</span>
+        <input type="number" class="input input-xs" data-field="remote" value="${values.remote ?? ''}">
+      </label>
+      ${
+        isReverse
+          ? `<label class="flex flex-col gap-1 text-[11px]">
+              <span>中间端口</span>
+              <input type="number" class="input input-xs" data-field="mid" value="${values.mid ?? ''}">
+            </label>`
+          : `<div class="flex items-center justify-end">
+              <button type="button" class="btn btn-danger btn-xxs" data-action="remove-row">删除</button>
+            </div>`
+      }
+      ${
+        isReverse
+          ? `<div class="col-span-3 flex justify-end">
+              <button type="button" class="btn btn-danger btn-xxs" data-action="remove-row">删除</button>
+            </div>`
+          : ''
+      }
+    `;
+    return row;
+  }
+
+  function appendForwardRow(listEl, type, values = {}) {
+    const row = renderForwardRow(type, values);
+    listEl.appendChild(row);
+  }
+
   function renderContainerCard(container = {}, idx = 0) {
     const listEl = document.getElementById('container-form-list');
     if (!listEl) return;
@@ -284,16 +324,29 @@
         <label>密码<input type="text" class="input" data-field="password" value="${ssh.password || ''}"></label>
         <label>容器 IP(兜底)<input type="text" class="input" data-field="container_ip" value="${ssh.container_ip || ''}"></label>
       </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <label>正向转发(-L)
-          <textarea class="input" data-field="forwards" rows="3" placeholder="本地:远端，换行或逗号分隔">${forwardLines(ssh.forwards)}</textarea>
-        </label>
-        <label>反向转发(-R)
-          <textarea class="input" data-field="reverse_forwards" rows="3" placeholder="本地:远端[:中间端口]，换行或逗号分隔">${reverseLines(ssh.reverse_forwards)}</textarea>
-        </label>
+      <div class="space-y-2">
+        <div class="flex items-center justify-between text-xs text-slate-600">
+          <span class="font-semibold">正向转发 (-L)</span>
+          <button type="button" class="btn btn-secondary btn-xxs" data-action="add-forward">新增</button>
+        </div>
+        <div class="space-y-2" data-list="forwards"></div>
+      </div>
+      <div class="space-y-2">
+        <div class="flex items-center justify-between text-xs text-slate-600">
+          <span class="font-semibold">反向转发 (-R)</span>
+          <button type="button" class="btn btn-secondary btn-xxs" data-action="add-reverse">新增</button>
+        </div>
+        <div class="space-y-2" data-list="reverse_forwards"></div>
       </div>
     `;
     listEl.appendChild(card);
+
+    const fList = card.querySelector('[data-list="forwards"]');
+    const rList = card.querySelector('[data-list="reverse_forwards"]');
+    const forwardData = Array.isArray(ssh.forwards) && ssh.forwards.length ? ssh.forwards : [{ local: '', remote: '' }];
+    forwardData.forEach((f) => appendForwardRow(fList, 'forward', f));
+    const reverseData = Array.isArray(ssh.reverse_forwards) && ssh.reverse_forwards.length ? ssh.reverse_forwards : [{ local: '', remote: '', mid: '' }];
+    reverseData.forEach((f) => appendForwardRow(rList, 'reverse', f));
   }
 
   function collectContainers() {
@@ -310,8 +363,30 @@
       const name = get('input[data-field="name"]').trim();
       const containerName = get('input[data-field="container_name"]').trim() || name;
       const restartStrategy = get('select[data-field="restart_strategy"]') || 'restart';
-      const forwards = parseForwardLines(get('textarea[data-field="forwards"]'));
-      const reverseForwards = parseReverseLines(get('textarea[data-field="reverse_forwards"]'));
+      const forwards = [];
+      const fList = card.querySelector('[data-list="forwards"]');
+      if (fList) {
+        fList.querySelectorAll('[data-kind="forward"]').forEach((row) => {
+          const l = Number(row.querySelector('input[data-field="local"]')?.value || '');
+          const r = Number(row.querySelector('input[data-field="remote"]')?.value || '');
+          if (!Number.isNaN(l) && !Number.isNaN(r)) {
+            forwards.push({ local: l, remote: r });
+          }
+        });
+      }
+      const reverseForwards = [];
+      const rList = card.querySelector('[data-list="reverse_forwards"]');
+      if (rList) {
+        rList.querySelectorAll('[data-kind="reverse"]').forEach((row) => {
+          const l = Number(row.querySelector('input[data-field="local"]')?.value || '');
+          const r = Number(row.querySelector('input[data-field="remote"]')?.value || '');
+          const mRaw = row.querySelector('input[data-field="mid"]')?.value || '';
+          const m = mRaw === '' ? null : Number(mRaw);
+          if (!Number.isNaN(l) && !Number.isNaN(r)) {
+            reverseForwards.push({ local: l, remote: r, mid: Number.isNaN(m) ? null : m });
+          }
+        });
+      }
       const port = Number(get('input[data-field="port"]')) || null;
       const containerPort = Number(get('input[data-field="container_port"]')) || null;
       return {
@@ -343,10 +418,26 @@
     const listEl = document.getElementById('container-form-list');
     if (!listEl) return;
     listEl.addEventListener('click', (ev) => {
-      const btn = ev.target.closest('[data-action="remove"]');
+      const btn = ev.target.closest('[data-action]');
       if (!btn) return;
+      const action = btn.getAttribute('data-action');
       const card = btn.closest('[data-index]');
-      if (card) card.remove();
+      if (!card) return;
+      if (action === 'remove') {
+        card.remove();
+      }
+      if (action === 'add-forward') {
+        const list = card.querySelector('[data-list="forwards"]');
+        if (list) appendForwardRow(list, 'forward', { local: '', remote: '' });
+      }
+      if (action === 'add-reverse') {
+        const list = card.querySelector('[data-list="reverse_forwards"]');
+        if (list) appendForwardRow(list, 'reverse', { local: '', remote: '', mid: '' });
+      }
+      if (action === 'remove-row') {
+        const row = btn.closest('[data-kind]');
+        if (row) row.remove();
+      }
     });
   }
 
