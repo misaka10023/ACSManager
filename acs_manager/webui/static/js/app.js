@@ -250,7 +250,7 @@
     const listEl = document.getElementById('container-form-list');
     if (!listEl) return;
     const card = document.createElement('div');
-    card.className = 'p-3 border rounded bg-white shadow-sm space-y-2';
+    card.className = 'p-3 border rounded bg-white shadow-sm space-y-3';
     card.dataset.index = idx.toString();
     const ssh = container.ssh || {};
     const restart = container.restart || {};
@@ -259,7 +259,7 @@
         <div class="text-sm font-semibold">容器 #${idx + 1}</div>
         <button type="button" class="btn btn-danger btn-xxs" data-action="remove">删除</button>
       </div>
-      <div class="form-grid">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <label>名称(name)<input type="text" class="input" data-field="name" value="${container.name || ''}"></label>
         <label>ACS 容器名<input type="text" class="input" data-field="container_name" value="${(container.acs && container.acs.container_name) || ''}"></label>
         <label>重启策略
@@ -284,9 +284,13 @@
         <label>密码<input type="text" class="input" data-field="password" value="${ssh.password || ''}"></label>
         <label>容器 IP(兜底)<input type="text" class="input" data-field="container_ip" value="${ssh.container_ip || ''}"></label>
       </div>
-      <div class="form-grid">
-        <label>正向转发(-L)<textarea class="input" data-field="forwards" rows="3" placeholder="本地:远端">${forwardLines(ssh.forwards)}</textarea></label>
-        <label>反向转发(-R)<textarea class="input" data-field="reverse_forwards" rows="3" placeholder="本地:远端[:中间端口]">${reverseLines(ssh.reverse_forwards)}</textarea></label>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <label>正向转发(-L)
+          <textarea class="input" data-field="forwards" rows="3" placeholder="本地:远端，换行或逗号分隔">${forwardLines(ssh.forwards)}</textarea>
+        </label>
+        <label>反向转发(-R)
+          <textarea class="input" data-field="reverse_forwards" rows="3" placeholder="本地:远端[:中间端口]，换行或逗号分隔">${reverseLines(ssh.reverse_forwards)}</textarea>
+        </label>
       </div>
     `;
     listEl.appendChild(card);

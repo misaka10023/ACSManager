@@ -8,15 +8,18 @@
       <button id="cfg-save" class="btn btn-primary">保存配置</button>
     </div>
   </div>
-  <div class="text-xs text-slate-600 mb-3 space-y-1">
-    <div><span class="font-semibold">提示：</span>配置项均为 UTF-8；root_path 需与反代前缀一致；使用 password_hash 时清空 password。</div>
-    <div><span class="font-semibold">转发：</span>正向/反向转发每行填写 <code>本地:远端</code> 或 <code>本地:远端:中间端口</code>（double 需中间端口）。</div>
+  <div class="text-xs text-slate-600 mb-4 space-y-1">
+    <div><span class="font-semibold">提示：</span>所有配置均为 UTF-8；root_path 与反代前缀保持一致；使用 password_hash 时请清空 password。</div>
+    <div><span class="font-semibold">转发格式：</span><code>本地:远端</code> 或 <code>本地:远端:中间端口</code>（double 必填中间端口）。每行一条，或用逗号分隔。</div>
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
     <div class="space-y-4">
       <div class="subcard">
-        <div class="subcard-title">全局 ACS</div>
+        <div class="subcard-title flex items-center justify-between">
+          <span>全局 ACS</span>
+          <span class="text-[11px] text-slate-500">登录 / 公钥 / Cookies</span>
+        </div>
         <div class="form-grid">
           <label>Base URL<input id="acs-base-url" type="text" class="input" placeholder="http://192.168.10.200:6080"></label>
           <label>API 前缀<input id="acs-api-prefix" type="text" class="input" placeholder="/sothisai"></label>
@@ -31,7 +34,10 @@
       </div>
 
       <div class="subcard">
-        <div class="subcard-title">Web UI</div>
+        <div class="subcard-title flex items-center justify-between">
+          <span>Web UI</span>
+          <span class="text-[11px] text-slate-500">访问 / 认证</span>
+        </div>
         <div class="form-grid">
           <label>Host<input id="webui-host" type="text" class="input" placeholder="0.0.0.0"></label>
           <label>Port<input id="webui-port" type="number" class="input" placeholder="8000"></label>
