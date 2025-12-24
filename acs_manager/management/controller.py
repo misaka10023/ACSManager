@@ -774,7 +774,26 @@ done
                             "SSH tunnel failed >=3 times; refreshing container IP via API (container: %s).",
                             name,
                         )
-                        self.resolve_container_ip(force_login=True)
+                        ip = self.resolve_container_ip(force_login=True)
+                        if not ip:
+                            # 如果 IP 仍未获取但登录正常，可尝试读取容器状态，异常则触发重启
+                            try:
+                                info = self.container_client.get_container_instance_info_by_name(name) if name else None
+                            except Exception as exc:  # pragma: no cover - network errors
+                                logger.error("Failed to fetch container status after tunnel failures: %s", exc)
+                                info = None
+                            status = (info or {}).get("status")
+                            unhealthy = status and status.lower() not in {
+                                "running",
+                                "pending",
+                                "deploying",
+                                "queued",
+                                "queue",
+                                "starting",
+                            }
+                            if unhealthy:
+                                logger.warning("Container %s status %s appears unhealthy; attempting restart.", name, status)
+                                await self.restart_container()
                         self._tunnel_failure_count = 0
             except Exception as exc:  # pragma: no cover - subprocess errors
                 logger.error("SSH tunnel crashed: %s", exc)
