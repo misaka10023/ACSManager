@@ -32,6 +32,8 @@ class ConfigStore:
         self._lock = threading.RLock()
         self._cache: Dict[str, Any] = {}
         self._format = self.path.suffix.lower()
+        self._migration_performed = False
+        self._migration_backup: Optional[Path] = None
         self._template_version: Optional[Any] = self._load_template_version()
         self._ensure_version()
         self.reload()
@@ -139,11 +141,13 @@ class ConfigStore:
         if current_version == template_version:
             return
 
-        self._backup_current()
+        backup_path = self._backup_current()
         merged = self._merge_with_template(copy.deepcopy(template_cfg), current_cfg)
         merged["config_version"] = template_version
         try:
             dump_settings(self.path, merged)
+            self._migration_performed = True
+            self._migration_backup = backup_path
             logger.info(
                 "Migrated config %s from version %s to %s using template %s",
                 self.path,
@@ -167,6 +171,14 @@ class ConfigStore:
         updated = copy.deepcopy(data)
         updated["config_version"] = target_version
         return updated
+
+    @property
+    def migration_performed(self) -> bool:
+        return bool(self._migration_performed)
+
+    @property
+    def migration_backup(self) -> Optional[Path]:
+        return self._migration_backup
 
     def reload(self) -> Dict[str, Any]:
         """Force reload from disk and refresh the cache."""

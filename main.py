@@ -73,6 +73,13 @@ async def run(config_path: str, log_level: str) -> None:
         logging.error("已生成配置文件 %s，请填写配置后重新运行。", cfg_path)
         return
     store = ConfigStore(cfg_path)
+    if getattr(store, "migration_performed", False):
+        backup = getattr(store, "migration_backup", None)
+        if backup:
+            logging.error("配置版本已更新，已备份旧文件到 %s。请检查并填写新的配置文件后重新运行。", backup)
+        else:
+            logging.error("配置版本已更新，已生成新配置文件。请检查并填写后重新运行。")
+        return
     multi_manager = MultiContainerManager(store)
     multi_manager.init_managers()
     web_app.bind_multi_manager(multi_manager)
