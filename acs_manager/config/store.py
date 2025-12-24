@@ -90,15 +90,13 @@ class ConfigStore:
     def _merge_with_template(self, template: Any, current: Any) -> Any:
         """
         Merge user values from `current` into `template` shape.
-        - Dict: only overlay keys that exist in template (config_version is skipped).
+        - Dict: only overlay keys that exist in template (including config_version).
         - List: prefer current list entirely when types match.
         - Scalar: prefer current when types match; otherwise keep template.
         """
         if isinstance(template, dict) and isinstance(current, dict):
             merged = copy.deepcopy(template)
             for key, value in merged.items():
-                if key == "config_version":
-                    continue
                 if key in current:
                     merged[key] = self._merge_with_template(value, current[key])
             return merged
