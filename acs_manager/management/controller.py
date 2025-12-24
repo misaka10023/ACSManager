@@ -205,6 +205,11 @@ class ContainerManager:
             self._persist_restart_cfg(restart_cfg)
             self.state["last_restart"] = dt.datetime.now()
             logger.info("Created new task %s from %s: %s", new_name, base_name, resp)
+            try:
+                # Persist the new ACS container name so后续 IP 解析/隧道重启使用新任务
+                self.store.update({"acs": {"container_name": new_name}})
+            except Exception as exc:  # pragma: no cover - IO errors
+                logger.warning("Failed to persist new container_name %s: %s", new_name, exc)
             return True
 
         logger.error("Create new task failed: %s", resp)
