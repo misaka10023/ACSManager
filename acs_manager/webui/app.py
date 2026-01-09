@@ -129,14 +129,31 @@ def _run_git(args: list[str], cwd: Path) -> str:
     return stdout or stderr
 
 
+def _ensure_repo_clean(repo_root: Path) -> None:
+    _run_git(["git", "rev-parse", "--is-inside-work-tree"], repo_root)
+    status = _run_git(["git", "status", "--porcelain"], repo_root)
+    if status:
+        raise RuntimeError("Repository has uncommitted changes; aborting update.")
+
+
+def _check_update(repo_root: Path) -> int:
+    _run_git(["git", "fetch", "--prune"], repo_root)
+    upstream = _run_git(["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], repo_root)
+    behind = _run_git(["git", "rev-list", "--count", f"HEAD..{upstream}"], repo_root)
+    try:
+        return int(behind)
+    except ValueError:
+        return 0
+
+
 def _update_repo() -> Dict[str, Any]:
     repo_root = _repo_root()
-    _run_git(["git", "rev-parse", "--is-inside-work-tree"], repo_root)
-    head_before = _run_git(["git", "rev-parse", "HEAD"], repo_root)
-    _run_git(["git", "pull", "--ff-only"], repo_root)
-    head_after = _run_git(["git", "rev-parse", "HEAD"], repo_root)
-    updated = head_before != head_after
-    return {"updated": updated}
+    _ensure_repo_clean(repo_root)
+    behind = _check_update(repo_root)
+    if behind <= 0:
+        return {"updated": False, "behind": behind}
+    _run_git(["git", "pull"], repo_root)
+    return {"updated": True, "behind": behind}
 
 
 def _restart_self() -> None:
@@ -602,7 +619,7 @@ async def update_app(user: str = Depends(require_auth)) -> dict:
             raise HTTPException(status_code=409, detail="Update already running")
         setattr(app.state, _UPDATE_FLAG_KEY, True)
         try:
-            logger.info("Update requested; pulling latest changes.")
+            logger.info("Update requested; checking for updates.")
             result = await asyncio.to_thread(_update_repo)
         except Exception as exc:
             logger.error("Update failed: %s", exc)
