@@ -129,34 +129,14 @@ def _run_git(args: list[str], cwd: Path) -> str:
     return stdout or stderr
 
 
-def _ensure_repo_clean(repo_root: Path) -> None:
-    _run_git(["git", "rev-parse", "--is-inside-work-tree"], repo_root)
-    dirty = _run_git(["git", "status", "--porcelain"], repo_root)
-    if dirty.strip():
-        raise RuntimeError("Repository has uncommitted changes; aborting update.")
-
-
-def _check_update(repo_root: Path) -> Dict[str, Any]:
-    _ensure_repo_clean(repo_root)
-    _run_git(["git", "fetch", "--prune"], repo_root)
-    try:
-        upstream = _run_git(["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], repo_root)
-    except RuntimeError as exc:
-        raise RuntimeError("No upstream configured; cannot check for updates.") from exc
-    try:
-        behind = int(_run_git(["git", "rev-list", "--count", f"HEAD..{upstream}"], repo_root))
-    except ValueError as exc:
-        raise RuntimeError("Failed to parse update status.") from exc
-    return {"behind": behind, "upstream": upstream}
-
-
 def _update_repo() -> Dict[str, Any]:
     repo_root = _repo_root()
-    status = _check_update(repo_root)
-    if status["behind"] <= 0:
-        return {"updated": False, **status}
+    _run_git(["git", "rev-parse", "--is-inside-work-tree"], repo_root)
+    head_before = _run_git(["git", "rev-parse", "HEAD"], repo_root)
     _run_git(["git", "pull", "--ff-only"], repo_root)
-    return {"updated": True, **status}
+    head_after = _run_git(["git", "rev-parse", "HEAD"], repo_root)
+    updated = head_before != head_after
+    return {"updated": updated}
 
 
 def _restart_self() -> None:
@@ -630,9 +610,9 @@ async def update_app(user: str = Depends(require_auth)) -> dict:
         finally:
             setattr(app.state, _UPDATE_FLAG_KEY, False)
     if not result.get("updated"):
-        return {"status": "up_to_date", "behind": result.get("behind", 0)}
+        return {"status": "up_to_date", "message": "已经是最新版本"}
     asyncio.create_task(_schedule_restart())
-    return {"status": "updated", "restart": "scheduled", "behind": result.get("behind", 0)}
+    return {"status": "updated", "message": "检测到新版本，正在更新并重启", "restart": "scheduled"}
 
 
 # -----------------------

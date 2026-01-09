@@ -599,7 +599,7 @@
     try {
       const resp = await fetchJSON('/update', { method: 'POST' });
       if (resp.status === 'up_to_date') {
-        showToast('当前已是最新版本，无需重启。');
+        showToast(resp.message || '当前已是最新版本，无需重启。');
         if (btn) {
           btn.disabled = false;
           btn.textContent = originalText || '更新并重启';
@@ -607,7 +607,7 @@
         return;
       }
       if (btn) btn.textContent = '更新中...';
-      showToast('检测到新版本，正在更新并重启，请稍候刷新页面...');
+      showToast(resp.message || '检测到新版本，正在更新并重启，请稍候刷新页面...');
     } catch (e) {
       showToast(`更新失败: ${String(e)}`, 'error');
       if (btn) {
