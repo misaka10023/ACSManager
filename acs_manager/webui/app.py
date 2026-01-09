@@ -428,20 +428,27 @@ def _critical_snapshot(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 async def _post_config_change(old_cfg: Dict[str, Any], new_cfg: Dict[str, Any]) -> None:
     """Handle config changes: restart tunnels (all containers when multi)."""
+    if "containers" in new_cfg:
+        if multi_manager:
+            await multi_manager.sync_managers()
+            targets = list(multi_manager.managers.values())
+        elif manager:
+            targets = [manager]
+        else:
+            return
+        for mgr in targets:
+            try:
+                await mgr.restart_tunnel()
+            except Exception as exc:
+                logger.error("Failed to restart tunnel (%s): %s", getattr(mgr, "container_id", "unknown"), exc)
+        return
+
     targets: list[ContainerManager] = []
     if multi_manager:
         targets = list(multi_manager.managers.values())
     elif manager:
         targets = [manager]
     else:
-        return
-
-    if "containers" in new_cfg:
-        for mgr in targets:
-            try:
-                await mgr.restart_tunnel()
-            except Exception as exc:
-                logger.error("Failed to restart tunnel (%s): %s", getattr(mgr, "container_id", "unknown"), exc)
         return
 
     before = _critical_snapshot(old_cfg)

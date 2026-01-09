@@ -21,7 +21,7 @@ class MultiContainerManager:
         self.base_store = base_store
         self.state_store = RuntimeStateStore(self._derive_state_path())
         self.managers: Dict[str, ContainerManager] = {}
-        self._tasks: List[asyncio.Task] = []
+        self._tasks_by_manager: Dict[str, List[asyncio.Task]] = {}
 
     def _derive_state_path(self) -> Path:
         cfg_path = Path(self.base_store.path)
@@ -121,32 +121,76 @@ class MultiContainerManager:
             self.managers[cid] = manager
             manager.bind_state_store(self.state_store)
 
+    def _spawn_tasks_for(self, manager: ContainerManager) -> List[asyncio.Task]:
+        tasks: List[asyncio.Task] = []
+        acs_cfg = manager._acs_cfg(reload=True)  # type: ignore[attr-defined]
+        if acs_cfg.get("container_name"):
+            tasks.append(asyncio.create_task(manager.prepare_on_start()))
+        tasks.append(asyncio.create_task(manager.maintain_tunnel()))
+        if acs_cfg.get("container_name"):
+            tasks.append(
+                asyncio.create_task(
+                    manager.monitor_container(pre_shutdown_minutes=10, slow_interval=300, fast_interval=30)
+                )
+            )
+        return tasks
+
+    async def sync_managers(self) -> None:
+        """
+        Sync in-memory managers with current config containers.
+        Removed containers are shut down and pruned; new containers are started.
+        """
+        profiles = self.load_profiles()
+        desired: Dict[str, Dict[str, Any]] = {p["id"]: p for p in profiles}
+
+        for cid in list(self.managers.keys()):
+            if cid not in desired:
+                tasks = self._tasks_by_manager.pop(cid, [])
+                for task in tasks:
+                    task.cancel()
+                manager = self.managers.pop(cid)
+                try:
+                    await manager.shutdown()
+                except Exception as exc:
+                    logger.warning("Error shutting down container %s: %s", cid, exc)
+
+        for profile in profiles:
+            cid = profile["id"]
+            name = profile.get("name") or cid
+            if cid in self.managers:
+                manager = self.managers[cid]
+                if name and manager.display_name != name:
+                    manager.display_name = name
+                    manager.state["name"] = name
+                continue
+            scoped_store = ContainerScopedStore(self.base_store.path, cid) if hasattr(self.base_store, "path") else None
+            if scoped_store is None:
+                raise ValueError("Base config store must expose path for scoped containers.")
+            manager = ContainerManager(scoped_store, container_id=cid, display_name=name)
+            self.managers[cid] = manager
+            manager.bind_state_store(self.state_store)
+            self._tasks_by_manager[cid] = self._spawn_tasks_for(manager)
+
     async def start_background_tasks(self) -> List[asyncio.Task]:
         """Start maintain/monitor loops for all managers."""
         self.init_managers()
         tasks: List[asyncio.Task] = []
         for manager in self.managers.values():
-            acs_cfg = manager._acs_cfg(reload=True)  # type: ignore[attr-defined]
-            if acs_cfg.get("container_name"):
-                tasks.append(asyncio.create_task(manager.prepare_on_start()))
-            tasks.append(asyncio.create_task(manager.maintain_tunnel()))
-            if acs_cfg.get("container_name"):
-                tasks.append(
-                    asyncio.create_task(
-                        manager.monitor_container(pre_shutdown_minutes=10, slow_interval=300, fast_interval=30)
-                    )
-                )
-        self._tasks = tasks
+            manager_tasks = self._spawn_tasks_for(manager)
+            self._tasks_by_manager[manager.container_id] = manager_tasks
+            tasks.extend(manager_tasks)
         return tasks
 
     async def shutdown(self) -> None:
-        for task in self._tasks:
-            task.cancel()
+        for task_list in self._tasks_by_manager.values():
+            for task in task_list:
+                task.cancel()
         for manager in self.managers.values():
             try:
                 await manager.shutdown()
             except Exception as exc:
                 logger.warning("Error shutting down container %s: %s", manager.container_id, exc)
+        self._tasks_by_manager.clear()
 
     def list_states(self) -> List[Dict[str, Any]]:
         return [m.snapshot() for m in self.managers.values()]
