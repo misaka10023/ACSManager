@@ -129,13 +129,34 @@ def _run_git(args: list[str], cwd: Path) -> str:
     return stdout or stderr
 
 
-def _update_repo() -> None:
-    repo_root = _repo_root()
+def _ensure_repo_clean(repo_root: Path) -> None:
     _run_git(["git", "rev-parse", "--is-inside-work-tree"], repo_root)
     dirty = _run_git(["git", "status", "--porcelain"], repo_root)
     if dirty.strip():
         raise RuntimeError("Repository has uncommitted changes; aborting update.")
+
+
+def _check_update(repo_root: Path) -> Dict[str, Any]:
+    _ensure_repo_clean(repo_root)
+    _run_git(["git", "fetch", "--prune"], repo_root)
+    try:
+        upstream = _run_git(["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], repo_root)
+    except RuntimeError as exc:
+        raise RuntimeError("No upstream configured; cannot check for updates.") from exc
+    try:
+        behind = int(_run_git(["git", "rev-list", "--count", f"HEAD..{upstream}"], repo_root))
+    except ValueError as exc:
+        raise RuntimeError("Failed to parse update status.") from exc
+    return {"behind": behind, "upstream": upstream}
+
+
+def _update_repo() -> Dict[str, Any]:
+    repo_root = _repo_root()
+    status = _check_update(repo_root)
+    if status["behind"] <= 0:
+        return {"updated": False, **status}
     _run_git(["git", "pull", "--ff-only"], repo_root)
+    return {"updated": True, **status}
 
 
 def _restart_self() -> None:
@@ -602,14 +623,16 @@ async def update_app(user: str = Depends(require_auth)) -> dict:
         setattr(app.state, _UPDATE_FLAG_KEY, True)
         try:
             logger.info("Update requested; pulling latest changes.")
-            await asyncio.to_thread(_update_repo)
+            result = await asyncio.to_thread(_update_repo)
         except Exception as exc:
             logger.error("Update failed: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc))
         finally:
             setattr(app.state, _UPDATE_FLAG_KEY, False)
+    if not result.get("updated"):
+        return {"status": "up_to_date", "behind": result.get("behind", 0)}
     asyncio.create_task(_schedule_restart())
-    return {"status": "updated", "restart": "scheduled"}
+    return {"status": "updated", "restart": "scheduled", "behind": result.get("behind", 0)}
 
 
 # -----------------------

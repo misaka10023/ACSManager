@@ -580,11 +580,23 @@
     if (!confirm('确认更新并重启？')) return;
     if (btn) btn.disabled = true;
     if (status) {
-      status.textContent = '正在更新并重启，请稍候刷新页面...';
+      status.textContent = '正在检查更新...';
       status.className = 'text-sm text-slate-600 mt-2';
     }
     try {
-      await fetchJSON('/update', { method: 'POST' });
+      const resp = await fetchJSON('/update', { method: 'POST' });
+      if (resp.status === 'up_to_date') {
+        if (status) {
+          status.textContent = '当前已是最新版本，无需重启。';
+          status.className = 'text-sm text-slate-600 mt-2';
+        }
+        if (btn) btn.disabled = false;
+        return;
+      }
+      if (status) {
+        status.textContent = '更新完成，正在重启，请稍候刷新页面...';
+        status.className = 'text-sm text-slate-600 mt-2';
+      }
     } catch (e) {
       if (status) {
         status.textContent = `更新失败: ${String(e)}`;
