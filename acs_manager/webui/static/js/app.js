@@ -576,9 +576,12 @@
 
   async function updateApp() {
     const status = document.getElementById('cfg-status');
-    const btn = document.getElementById('cfg-update');
+    const btn = document.getElementById('app-update');
+    const originalText = btn ? btn.textContent : '';
+    const useStatus = Boolean(status);
     if (!confirm('确认更新并重启？')) return;
     if (btn) btn.disabled = true;
+    if (btn) btn.textContent = '检查中...';
     if (status) {
       status.textContent = '正在检查更新...';
       status.className = 'text-sm text-slate-600 mt-2';
@@ -590,19 +593,30 @@
           status.textContent = '当前已是最新版本，无需重启。';
           status.className = 'text-sm text-slate-600 mt-2';
         }
-        if (btn) btn.disabled = false;
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = originalText || '更新并重启';
+        }
         return;
       }
+      if (btn) btn.textContent = '更新中...';
       if (status) {
         status.textContent = '更新完成，正在重启，请稍候刷新页面...';
         status.className = 'text-sm text-slate-600 mt-2';
+      } else if (!useStatus) {
+        alert('更新完成，正在重启，请稍候刷新页面...');
       }
     } catch (e) {
       if (status) {
         status.textContent = `更新失败: ${String(e)}`;
         status.className = 'text-sm text-red-600 mt-2';
+      } else {
+        alert(`更新失败: ${String(e)}`);
       }
-      if (btn) btn.disabled = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = originalText || '更新并重启';
+      }
     }
   }
 
@@ -611,11 +625,9 @@
     bindContainerActions();
     const btnLoad = document.getElementById('cfg-load');
     const btnSave = document.getElementById('cfg-save');
-    const btnUpdate = document.getElementById('cfg-update');
     const btnAdd = document.getElementById('container-add');
     if (btnLoad) btnLoad.addEventListener('click', loadConfig);
     if (btnSave) btnSave.addEventListener('click', saveConfig);
-    if (btnUpdate) btnUpdate.addEventListener('click', updateApp);
     if (btnAdd) btnAdd.addEventListener('click', () => {
       const listEl = document.getElementById('container-form-list');
       const idx = listEl ? listEl.children.length : 0;
@@ -660,6 +672,8 @@
   }
 
   // ---------- Boot ----------
+  const updateBtn = document.getElementById('app-update');
+  if (updateBtn) updateBtn.addEventListener('click', updateApp);
   if (page === 'dashboard') initDashboard();
   if (page === 'config') initConfig();
   if (page === 'logs') initLogs();
