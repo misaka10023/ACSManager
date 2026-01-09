@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import asyncio
 import base64
 import datetime as dt
 import hashlib
 import hmac
 import json
 import logging
+import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -91,6 +95,58 @@ LOG_DIR = Path("logs")
 _root_path_middleware_added = False
 SESSION_COOKIE = "acsui_session"
 DEFAULT_SECRET = "change-me-please"
+_UPDATE_LOCK_KEY = "update_lock"
+_UPDATE_FLAG_KEY = "update_in_progress"
+
+
+def _get_update_lock() -> asyncio.Lock:
+    lock = getattr(app.state, _UPDATE_LOCK_KEY, None)
+    if lock is None:
+        lock = asyncio.Lock()
+        setattr(app.state, _UPDATE_LOCK_KEY, lock)
+    return lock
+
+
+def _repo_root() -> Path:
+    return BASE_DIR.parent.parent.resolve()
+
+
+def _run_git(args: list[str], cwd: Path) -> str:
+    env = os.environ.copy()
+    env.setdefault("GIT_TERMINAL_PROMPT", "0")
+    proc = subprocess.run(
+        args,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+    )
+    stdout = (proc.stdout or "").strip()
+    stderr = (proc.stderr or "").strip()
+    if proc.returncode != 0:
+        raise RuntimeError(stderr or stdout or f"git failed: {' '.join(args)}")
+    return stdout or stderr
+
+
+def _update_repo() -> None:
+    repo_root = _repo_root()
+    _run_git(["git", "rev-parse", "--is-inside-work-tree"], repo_root)
+    dirty = _run_git(["git", "status", "--porcelain"], repo_root)
+    if dirty.strip():
+        raise RuntimeError("Repository has uncommitted changes; aborting update.")
+    _run_git(["git", "pull", "--ff-only"], repo_root)
+
+
+def _restart_self() -> None:
+    repo_root = _repo_root()
+    os.chdir(str(repo_root))
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+
+
+async def _schedule_restart(delay_seconds: float = 0.8) -> None:
+    await asyncio.sleep(delay_seconds)
+    _restart_self()
 
 
 def bind_manager(instance: ContainerManager) -> None:
@@ -533,6 +589,27 @@ def tail_logs(lines: int = Query(200, ge=1, le=2000), user: str = Depends(requir
     content_lines = log_path.read_text(encoding="utf-8").splitlines()
     tail = content_lines[-lines:] if len(content_lines) > lines else content_lines
     return {"file": str(log_path), "lines": len(tail), "content": tail}
+
+
+@app.post("/update")
+async def update_app(user: str = Depends(require_auth)) -> dict:
+    lock = _get_update_lock()
+    if lock.locked():
+        raise HTTPException(status_code=409, detail="Update already running")
+    async with lock:
+        if getattr(app.state, _UPDATE_FLAG_KEY, False):
+            raise HTTPException(status_code=409, detail="Update already running")
+        setattr(app.state, _UPDATE_FLAG_KEY, True)
+        try:
+            logger.info("Update requested; pulling latest changes.")
+            await asyncio.to_thread(_update_repo)
+        except Exception as exc:
+            logger.error("Update failed: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc))
+        finally:
+            setattr(app.state, _UPDATE_FLAG_KEY, False)
+    asyncio.create_task(_schedule_restart())
+    return {"status": "updated", "restart": "scheduled"}
 
 
 # -----------------------

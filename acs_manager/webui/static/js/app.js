@@ -574,14 +574,36 @@
     }
   }
 
+  async function updateApp() {
+    const status = document.getElementById('cfg-status');
+    const btn = document.getElementById('cfg-update');
+    if (!confirm('确认更新并重启？')) return;
+    if (btn) btn.disabled = true;
+    if (status) {
+      status.textContent = '正在更新并重启，请稍候刷新页面...';
+      status.className = 'text-sm text-slate-600 mt-2';
+    }
+    try {
+      await fetchJSON('/update', { method: 'POST' });
+    } catch (e) {
+      if (status) {
+        status.textContent = `更新失败: ${String(e)}`;
+        status.className = 'text-sm text-red-600 mt-2';
+      }
+      if (btn) btn.disabled = false;
+    }
+  }
+
   function initConfig() {
     loadTasks().finally(() => loadConfig());
     bindContainerActions();
     const btnLoad = document.getElementById('cfg-load');
     const btnSave = document.getElementById('cfg-save');
+    const btnUpdate = document.getElementById('cfg-update');
     const btnAdd = document.getElementById('container-add');
     if (btnLoad) btnLoad.addEventListener('click', loadConfig);
     if (btnSave) btnSave.addEventListener('click', saveConfig);
+    if (btnUpdate) btnUpdate.addEventListener('click', updateApp);
     if (btnAdd) btnAdd.addEventListener('click', () => {
       const listEl = document.getElementById('container-form-list');
       const idx = listEl ? listEl.children.length : 0;
