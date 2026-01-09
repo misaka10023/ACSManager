@@ -23,6 +23,22 @@
     return res.json();
   }
 
+  function showToast(message, tone = 'info') {
+    const layer = document.getElementById('app-toast');
+    const card = document.getElementById('app-toast-card');
+    const msg = document.getElementById('app-toast-message');
+    if (!layer || !card || !msg) return;
+    msg.textContent = message;
+    card.classList.remove('is-error');
+    if (tone === 'error') card.classList.add('is-error');
+    layer.classList.add('is-visible');
+  }
+
+  function hideToast() {
+    const layer = document.getElementById('app-toast');
+    if (layer) layer.classList.remove('is-visible');
+  }
+
   // ---------- Dashboard (multi-container) ----------
   let containersCache = [];
   let tasksCache = [];
@@ -575,24 +591,15 @@
   }
 
   async function updateApp() {
-    const status = document.getElementById('cfg-status');
     const btn = document.getElementById('app-update');
     const originalText = btn ? btn.textContent : '';
-    const useStatus = Boolean(status);
-    if (!confirm('确认更新并重启？')) return;
     if (btn) btn.disabled = true;
     if (btn) btn.textContent = '检查中...';
-    if (status) {
-      status.textContent = '正在检查更新...';
-      status.className = 'text-sm text-slate-600 mt-2';
-    }
+    showToast('正在检查更新...');
     try {
       const resp = await fetchJSON('/update', { method: 'POST' });
       if (resp.status === 'up_to_date') {
-        if (status) {
-          status.textContent = '当前已是最新版本，无需重启。';
-          status.className = 'text-sm text-slate-600 mt-2';
-        }
+        showToast('当前已是最新版本，无需重启。');
         if (btn) {
           btn.disabled = false;
           btn.textContent = originalText || '更新并重启';
@@ -600,19 +607,9 @@
         return;
       }
       if (btn) btn.textContent = '更新中...';
-      if (status) {
-        status.textContent = '更新完成，正在重启，请稍候刷新页面...';
-        status.className = 'text-sm text-slate-600 mt-2';
-      } else if (!useStatus) {
-        alert('更新完成，正在重启，请稍候刷新页面...');
-      }
+      showToast('检测到新版本，正在更新并重启，请稍候刷新页面...');
     } catch (e) {
-      if (status) {
-        status.textContent = `更新失败: ${String(e)}`;
-        status.className = 'text-sm text-red-600 mt-2';
-      } else {
-        alert(`更新失败: ${String(e)}`);
-      }
+      showToast(`更新失败: ${String(e)}`, 'error');
       if (btn) {
         btn.disabled = false;
         btn.textContent = originalText || '更新并重启';
@@ -672,6 +669,8 @@
   }
 
   // ---------- Boot ----------
+  const toastClose = document.getElementById('app-toast-close');
+  if (toastClose) toastClose.addEventListener('click', hideToast);
   const updateBtn = document.getElementById('app-update');
   if (updateBtn) updateBtn.addEventListener('click', updateApp);
   if (page === 'dashboard') initDashboard();

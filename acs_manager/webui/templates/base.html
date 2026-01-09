@@ -41,6 +41,15 @@
       {% block content %}{% endblock %}
     </main>
   </div>
+  <div id="app-toast" class="toast-layer" role="status" aria-live="polite">
+    <div id="app-toast-card" class="card toast-card">
+      <div class="toast-title">更新提示</div>
+      <div id="app-toast-message" class="text-sm text-slate-600">准备就绪</div>
+      <div class="toast-actions">
+        <button id="app-toast-close" class="btn btn-secondary btn-xxs" type="button">关闭</button>
+      </div>
+    </div>
+  </div>
   <script>
     document.querySelectorAll(".nav-link").forEach((link) => {
       const isActive = link.dataset.page === "{{ page|default('') }}";

@@ -102,6 +102,38 @@ body.app-body {
   margin-bottom: 0.75rem;
 }
 
+.toast-layer {
+  position: fixed;
+  top: 84px;
+  right: 24px;
+  z-index: 40;
+  display: none;
+  pointer-events: none;
+}
+.toast-layer.is-visible {
+  display: block;
+}
+.toast-card {
+  min-width: 260px;
+  max-width: 360px;
+  pointer-events: auto;
+}
+.toast-card.is-error {
+  border-color: rgba(248, 113, 113, 0.5);
+  background: rgba(254, 242, 242, 0.92);
+}
+.toast-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 0.35rem;
+}
+.toast-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.6rem;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
