@@ -492,6 +492,13 @@ def _critical_snapshot(cfg: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _manager_enabled_for_auto_tasks(mgr: ContainerManager) -> bool:
+    try:
+        return mgr.configured_container_name(reload=True) is not None
+    except Exception:
+        return False
+
+
 async def _post_config_change(old_cfg: Dict[str, Any], new_cfg: Dict[str, Any]) -> None:
     """Handle config changes: restart tunnels (all containers when multi)."""
     if "containers" in new_cfg:
@@ -503,6 +510,12 @@ async def _post_config_change(old_cfg: Dict[str, Any], new_cfg: Dict[str, Any]) 
         else:
             return
         for mgr in targets:
+            if not _manager_enabled_for_auto_tasks(mgr):
+                logger.info(
+                    "Skip tunnel restart for %s (placeholder container name).",
+                    getattr(mgr, "container_id", "unknown"),
+                )
+                continue
             try:
                 await mgr.restart_tunnel()
             except Exception as exc:
@@ -528,6 +541,12 @@ async def _post_config_change(old_cfg: Dict[str, Any], new_cfg: Dict[str, Any]) 
 
     if acs_changed:
         for mgr in targets:
+            if not _manager_enabled_for_auto_tasks(mgr):
+                logger.info(
+                    "ACS config updated but container name is placeholder; skip login for %s.",
+                    getattr(mgr, "container_id", "unknown"),
+                )
+                continue
             try:
                 logger.info("ACS config changed; re-login to refresh cookies.")
                 mgr.container_client.login()  # type: ignore[attr-defined]
@@ -536,6 +555,12 @@ async def _post_config_change(old_cfg: Dict[str, Any], new_cfg: Dict[str, Any]) 
 
     if ssh_changed:
         for mgr in targets:
+            if not _manager_enabled_for_auto_tasks(mgr):
+                logger.info(
+                    "SSH config updated but container name is placeholder; skip tunnel restart for %s.",
+                    getattr(mgr, "container_id", "unknown"),
+                )
+                continue
             try:
                 logger.info("SSH config changed; restarting tunnel.")
                 await mgr.restart_tunnel()

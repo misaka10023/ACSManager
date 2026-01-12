@@ -67,52 +67,85 @@ def ensure_config(config_path: str, template_path: str = TEMPLATE_CONFIG) -> tup
     return target, True
 
 
+def _log_task_result(task: asyncio.Task) -> None:
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        return
+    except Exception as exc:
+        logging.error("Background task crashed (%s): %s", task.get_name(), exc)
+
+
 async def run(config_path: str, log_level: str) -> None:
     cfg_path, created = ensure_config(config_path)
     if created:
-        logging.error("已生成配置文件 %s，请填写配置后重新运行。", cfg_path)
-        return
+        logging.warning(
+            "Config file created from template: %s. Update it via Web UI or config file.",
+            cfg_path,
+        )
     store = ConfigStore(cfg_path)
     if getattr(store, "migration_performed", False):
         backup = getattr(store, "migration_backup", None)
         if backup:
-            logging.error("配置版本已更新，已备份旧文件到 %s。请检查并填写新的配置文件后重新运行。", backup)
+            logging.warning(
+                "Config version updated; backup saved to %s. Please review the new config.",
+                backup,
+            )
         else:
-            logging.error("配置版本已更新，已生成新配置文件。请检查并填写后重新运行。")
-        return
-    multi_manager = MultiContainerManager(store)
-    multi_manager.init_managers()
-    web_app.bind_multi_manager(multi_manager)
+            logging.warning("Config version updated; please review the new config.")
     web_app.bind_config_store(store)
+
+    multi_manager: MultiContainerManager | None = None
+    try:
+        multi_manager = MultiContainerManager(store)
+        multi_manager.init_managers()
+        web_app.bind_multi_manager(multi_manager)
+    except Exception as exc:
+        logging.error("Failed to initialize container managers: %s", exc)
 
     web_cfg = store.get_section("webui", default={}, reload=True)
     web_app.set_root_path(web_cfg.get("root_path", ""))
 
-    web_task = asyncio.create_task(start_web_ui(web_cfg))
-    background_tasks = await multi_manager.start_background_tasks()
-
-    sniffer_tasks = []
-    for m in multi_manager.managers.values():
+    web_task = asyncio.create_task(start_web_ui(web_cfg), name="web_ui")
+    background_tasks: list[asyncio.Task] = []
+    if multi_manager:
         try:
-            acs_cfg = m._acs_cfg(reload=True)  # type: ignore[attr-defined]
-            target_url = acs_cfg.get("base_url", "")
-            if target_url:
-                sniffer = PacketSniffer(
-                    target_url=target_url,
-                    on_new_ip=lambda ip, mgr=m: asyncio.create_task(mgr.handle_new_ip(ip)),
-                )
-                sniffer_tasks.append(asyncio.create_task(sniffer.start()))
+            background_tasks = await multi_manager.start_background_tasks()
         except Exception as exc:
-            logging.warning("Failed to start sniffer for %s: %s", getattr(m, "container_id", "unknown"), exc)
+            logging.error("Failed to start container background tasks: %s", exc)
+            background_tasks = []
 
-    tasks = sniffer_tasks + [web_task] + background_tasks
+    sniffer_tasks: list[asyncio.Task] = []
+    if multi_manager:
+        for m in multi_manager.managers.values():
+            try:
+                acs_cfg = m._acs_cfg(reload=True)  # type: ignore[attr-defined]
+                target_url = acs_cfg.get("base_url", "")
+                if target_url and m.configured_container_name(reload=False):
+                    sniffer = PacketSniffer(
+                        target_url=target_url,
+                        on_new_ip=lambda ip, mgr=m: asyncio.create_task(mgr.handle_new_ip(ip)),
+                    )
+                    sniffer_tasks.append(asyncio.create_task(sniffer.start()))
+            except Exception as exc:
+                logging.warning("Failed to start sniffer for %s: %s", getattr(m, "container_id", "unknown"), exc)
+
+    background_all = sniffer_tasks + background_tasks
+    for task in background_all:
+        task.add_done_callback(_log_task_result)
+
     logging.info("ACS Manager running. Press Ctrl+C to exit.")
     try:
-        await asyncio.gather(*tasks)
+        await web_task
     except asyncio.CancelledError:
         logging.info("Shutdown requested.")
+    except Exception as exc:
+        logging.error("Web UI stopped unexpectedly: %s", exc)
     finally:
-        await multi_manager.shutdown()
+        for task in background_all:
+            task.cancel()
+        if multi_manager:
+            await multi_manager.shutdown()
 
 
 def parse_args() -> argparse.Namespace:

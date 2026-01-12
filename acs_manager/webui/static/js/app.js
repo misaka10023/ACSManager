@@ -3,6 +3,7 @@
 
   const basePath = (document.body.getAttribute('data-base-path') || '').replace(/\/+$/, '');
   const page = document.body.getAttribute('data-page') || '';
+  const DEFAULT_CONTAINER_NAME = 'default';
 
   const withBase = (path) => {
     const normalized = path.startsWith('/') ? path : `/${path}`;
@@ -508,7 +509,7 @@
 
     setValue('log-level', data.logging?.level);
 
-    const containers = Array.isArray(data.containers) && data.containers.length ? data.containers : [{ name: '', acs: { container_name: '' }, restart: { strategy: 'restart' }, ssh: {} }];
+    const containers = Array.isArray(data.containers) && data.containers.length ? data.containers : [{ name: DEFAULT_CONTAINER_NAME, acs: { container_name: DEFAULT_CONTAINER_NAME }, restart: { strategy: 'restart' }, ssh: {} }];
     const listEl = document.getElementById('container-form-list');
     if (listEl) listEl.innerHTML = '';
     containers.forEach((c, idx) => renderContainerCard(c, idx));
@@ -618,7 +619,8 @@
   }
 
   function initConfig() {
-    loadTasks().finally(() => loadConfig());
+    loadTasks();
+    loadConfig();
     bindContainerActions();
     const btnLoad = document.getElementById('cfg-load');
     const btnSave = document.getElementById('cfg-save');

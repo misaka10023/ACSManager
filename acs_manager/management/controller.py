@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 class ContainerManager:
     """处理 ACS 容器生命周期、IP 跟踪与 SSH 隧道维护。"""
 
+    PLACEHOLDER_CONTAINER_NAMES = {"default", "placeholder", "none"}
+
     def __init__(
         self,
         store: ConfigStore,
@@ -57,6 +59,22 @@ class ContainerManager:
         self._tunnel_started_once = False
         self._tunnel_failure_count = 0
 
+    @staticmethod
+    def _normalize_container_name(name: Optional[str]) -> str:
+        return str(name or "").strip().lower()
+
+    def is_placeholder_container_name(self, name: Optional[str] = None) -> bool:
+        if name is None:
+            name = self._acs_cfg(reload=False).get("container_name")
+        normalized = self._normalize_container_name(name)
+        return normalized == "" or normalized in self.PLACEHOLDER_CONTAINER_NAMES
+
+    def configured_container_name(self, *, reload: bool = False) -> Optional[str]:
+        name = self._acs_cfg(reload=reload).get("container_name")
+        if self.is_placeholder_container_name(name):
+            return None
+        return str(name).strip()
+
     async def handle_new_ip(self, ip: str) -> None:
         """捕获到新的容器 IP 时更新状态，若隧道已启动则重启隧道。"""
         old_ip = self.state.get("container_ip")
@@ -91,9 +109,9 @@ class ContainerManager:
 
     def resolve_container_ip(self, *, force_login: bool = True) -> Optional[str]:
         """在 IP 未知时通过 API 自动获取。"""
-        name = self._acs_cfg(reload=True).get("container_name")
+        name = self.configured_container_name(reload=True)
         if not name:
-            logger.warning("acs.container_name not configured; cannot auto-resolve IP.")
+            logger.warning("acs.container_name not configured or placeholder; cannot auto-resolve IP.")
             return None
         ssh_cfg = self._ssh_cfg(reload=False)
         if force_login:
@@ -217,10 +235,9 @@ class ContainerManager:
 
     async def restart_container(self) -> None:
         """调用 ACS 重启接口。"""
-        acs_cfg = self._acs_cfg(reload=True)
-        name = acs_cfg.get("container_name")
+        name = self.configured_container_name(reload=True)
         if not name:
-            logger.error("acs.container_name not configured; cannot restart.")
+            logger.error("acs.container_name not configured or placeholder; cannot restart.")
             return
 
         try:
@@ -291,10 +308,9 @@ class ContainerManager:
 
     async def monitor_container(self, *, pre_shutdown_minutes: int = 10, slow_interval: int = 300, fast_interval: int = 30) -> None:
         """周期检查容器状态，接近超时时加快轮询，停止则重启。"""
-        acs_cfg = self._acs_cfg(reload=True)
-        name = acs_cfg.get("container_name")
+        name = self.configured_container_name(reload=True)
         if not name:
-            logger.warning("acs.container_name not configured; monitor loop exits.")
+            logger.warning("acs.container_name not configured or placeholder; monitor loop exits.")
             return
 
         while not self._stop_requested:
@@ -822,10 +838,9 @@ done
 
     async def prepare_on_start(self, wait_interval: int = 5, start_timeout: int = 300) -> None:
         """启动阶段：登录后检查容器状态，Waiting 等待，Stopped 重启，Running 继续。"""
-        acs_cfg = self._acs_cfg(reload=True)
-        name = acs_cfg.get("container_name")
+        name = self.configured_container_name(reload=True)
         if not name:
-            logger.warning("acs.container_name not configured; skip startup check.")
+            logger.warning("acs.container_name not configured or placeholder; skip startup check.")
             return
 
         try:

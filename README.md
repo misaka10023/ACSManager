@@ -55,7 +55,7 @@
 - **配置管理 (`acs_manager.config`)**
   - 支持 YAML / JSON；使用 `ConfigStore` 做线程安全缓存和原子写入。
   - Web UI 与主程序通过同一个 `ConfigStore` 协同，始终操作同一份配置文件。
-  - 配置包含 `config_version`；版本缺失或与模板不一致时，会把旧文件复制到 `config/old/<name>.old`，用模板重建并自动合并旧值，随后程序退出以便用户确认后再运行。
+- Config includes `config_version`; when missing or mismatched, the old file is backed up to `config/old/<name>.old`, the template is merged, and the app continues to run with a warning.
   - 运行态、非人工可编辑的数据（如重建次数等）存放在 `state/runtime_state.yaml`，与配置文件分离。
 
 - **日志**
@@ -74,18 +74,15 @@
   - `webui/`：FastAPI App，包含 JSON API 和 HTML UI。
   - `__init__.py`：包初始化。
 - `config/examples/settings.example.yaml`：示例配置文件（带中文注释）。
-- `config/local/settings.yaml`：实际运行配置（首次运行自动生成）。
-- `logs/`：按日期命名的日志文件。
-- `main.py`：入口脚本，串联配置、容器管理和 Web UI。
-- `requirements.txt`：依赖列表。
+First run: if `config/local/settings.yaml` does not exist, the app will:
 
----
+1. Copy the template from `config/examples/settings.example.yaml`.
+2. Start the Web UI (open `/ui/config` to edit settings).
+3. Skip container tasks while the container name is the default placeholder.
 
-## 快速开始
+After saving the config, changes apply automatically without restart.
 
-### 1. 环境准备
-
-建议使用 Python 3.11+：
+You can also copy manually:
 
 ```bash
 python -m venv .venv
@@ -287,7 +284,7 @@ curl -X PATCH http://localhost:8000/config \
 - `login_user` / `login_password` / `user_type` / `public_key`：登录相关。
 - `verify_ssl`：自签名证书时可设为 `false`。
 - `cookies`：预置 cookies；自动登录成功后会被最新值覆盖。
-- `container_name`：容器/任务名称，例如 `Instances_2511296089`。请在“容器服务”界面创建容器，其他入口创建的实例通过上述 API 通常无法查询到容器 IP。
+- `container_name`: container/task name (e.g. `Instances_2511296089`). When set to the default placeholder `default`, auto container tasks are disabled until updated.
 
 ### `ssh` 段
 

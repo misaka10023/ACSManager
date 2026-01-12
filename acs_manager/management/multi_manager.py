@@ -121,18 +121,42 @@ class MultiContainerManager:
             self.managers[cid] = manager
             manager.bind_state_store(self.state_store)
 
+    def _should_start_tasks(self, manager: ContainerManager, *, log: bool = False) -> bool:
+        name = manager.configured_container_name(reload=True)
+        if not name:
+            if log:
+                logger.info(
+                    "Container %s has placeholder name; background tasks disabled.",
+                    manager.container_id,
+                )
+            return False
+        return True
+
+    @staticmethod
+    def _has_active_tasks(tasks: List[asyncio.Task]) -> bool:
+        return any(not task.done() for task in tasks)
+
+    async def _stop_tasks_for(self, manager: ContainerManager, tasks: List[asyncio.Task]) -> None:
+        if not tasks:
+            return
+        for task in tasks:
+            task.cancel()
+        try:
+            await manager.stop_tunnel()
+        except Exception as exc:
+            logger.warning("Failed to stop tunnel for %s: %s", manager.container_id, exc)
+
     def _spawn_tasks_for(self, manager: ContainerManager) -> List[asyncio.Task]:
         tasks: List[asyncio.Task] = []
-        acs_cfg = manager._acs_cfg(reload=True)  # type: ignore[attr-defined]
-        if acs_cfg.get("container_name"):
-            tasks.append(asyncio.create_task(manager.prepare_on_start()))
+        if not self._should_start_tasks(manager, log=True):
+            return tasks
+        tasks.append(asyncio.create_task(manager.prepare_on_start()))
         tasks.append(asyncio.create_task(manager.maintain_tunnel()))
-        if acs_cfg.get("container_name"):
-            tasks.append(
-                asyncio.create_task(
-                    manager.monitor_container(pre_shutdown_minutes=10, slow_interval=300, fast_interval=30)
-                )
+        tasks.append(
+            asyncio.create_task(
+                manager.monitor_container(pre_shutdown_minutes=10, slow_interval=300, fast_interval=30)
             )
+        )
         return tasks
 
     async def sync_managers(self) -> None:
@@ -145,10 +169,9 @@ class MultiContainerManager:
 
         for cid in list(self.managers.keys()):
             if cid not in desired:
-                tasks = self._tasks_by_manager.pop(cid, [])
-                for task in tasks:
-                    task.cancel()
                 manager = self.managers.pop(cid)
+                tasks = self._tasks_by_manager.pop(cid, [])
+                await self._stop_tasks_for(manager, tasks)
                 try:
                     await manager.shutdown()
                 except Exception as exc:
@@ -162,6 +185,15 @@ class MultiContainerManager:
                 if name and manager.display_name != name:
                     manager.display_name = name
                     manager.state["name"] = name
+                tasks = self._tasks_by_manager.get(cid, [])
+                should_run = self._should_start_tasks(manager)
+                if should_run and not self._has_active_tasks(tasks):
+                    logger.info("Starting background tasks for container %s after config update.", cid)
+                    self._tasks_by_manager[cid] = self._spawn_tasks_for(manager)
+                elif not should_run and tasks:
+                    logger.info("Stopping background tasks for container %s (placeholder name).", cid)
+                    await self._stop_tasks_for(manager, tasks)
+                    self._tasks_by_manager[cid] = []
                 continue
             scoped_store = ContainerScopedStore(self.base_store.path, cid) if hasattr(self.base_store, "path") else None
             if scoped_store is None:
