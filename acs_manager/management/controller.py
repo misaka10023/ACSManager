@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 import psutil
 
+from acs_manager.capture.sniffer import PacketSniffer
 from acs_manager.config.store import ConfigStore
 from acs_manager.container.client import ContainerClient
 from acs_manager.config.state_store import RuntimeStateStore
@@ -42,6 +43,7 @@ class ContainerManager:
             "id": self.container_id,
             "name": self.display_name,
             "container_ip": None,
+            "ip_source": None,
             "next_shutdown": None,
             "remaining_seconds": None,
             "timeout_limit": None,
@@ -75,10 +77,12 @@ class ContainerManager:
             return None
         return str(name).strip()
 
-    async def handle_new_ip(self, ip: str) -> None:
+    async def handle_new_ip(self, ip: str, *, source: Optional[str] = None) -> None:
         """捕获到新的容器 IP 时更新状态，若隧道已启动则重启隧道。"""
         old_ip = self.state.get("container_ip")
         self.state["last_seen"] = dt.datetime.now()
+        if source:
+            self.state["ip_source"] = source
 
         if old_ip == ip and self._tunnel_started_once:
             logger.debug("Container IP unchanged (%s); heartbeat only.", ip)
@@ -129,10 +133,20 @@ class ContainerManager:
             ip = info["instanceIp"]
             self.state["container_ip"] = ip
             self.state["last_seen"] = dt.datetime.now()
+            self.state["ip_source"] = "api"
             logger.info("Resolved container IP via API: %s", ip)
             return ip
         logger.warning("Could not resolve container %s IP from API.", name)
         return None
+
+    async def ingest_capture_event(self, payload: Dict[str, Any]) -> Optional[str]:
+        """Extract an IP from a captured ACS payload and apply it to this container."""
+        ip = PacketSniffer.extract_ip(payload)
+        if not ip:
+            logger.warning("No IP found in captured payload for container %s.", self.container_id)
+            return None
+        await self.handle_new_ip(ip, source="capture")
+        return ip
     async def ensure_running(self) -> None:
         """检测到容器停止时触发重启。"""
         await self.restart_container()
@@ -832,6 +846,7 @@ done
                 fallback_ip = ssh_cfg.get("container_ip") if isinstance(ssh_cfg, dict) else None
                 if fallback_ip:
                     snap["container_ip"] = fallback_ip
+                    snap.setdefault("ip_source", "fallback")
             except Exception:
                 pass
         return snap

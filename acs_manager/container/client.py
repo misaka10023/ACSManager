@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import datetime as dt
+import json
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -232,6 +233,71 @@ class ContainerClient:
         url = self._url_api(f"/api/instance/{instance_service_id}/container-monitor")
         return self._request_json("get", url)
 
+    @staticmethod
+    def _looks_like_ip(value: Any) -> bool:
+        text = str(value or "").strip()
+        parts = text.split(".")
+        if len(parts) != 4:
+            return False
+        try:
+            return all(0 <= int(part) <= 255 for part in parts)
+        except ValueError:
+            return False
+
+    @classmethod
+    def _extract_ip_candidate(cls, payload: Any) -> Optional[str]:
+        """Extract an IP from nested ACS payloads or captured text bodies."""
+        if isinstance(payload, dict):
+            for key in ("instanceIp", "headerNotebookIp", "container_ip", "ip", "host", "address"):
+                if key not in payload:
+                    continue
+                candidate = cls._extract_ip_candidate(payload.get(key))
+                if candidate:
+                    return candidate
+            for value in payload.values():
+                candidate = cls._extract_ip_candidate(value)
+                if candidate:
+                    return candidate
+            return None
+
+        if isinstance(payload, (list, tuple)):
+            for item in payload:
+                candidate = cls._extract_ip_candidate(item)
+                if candidate:
+                    return candidate
+            return None
+
+        if not isinstance(payload, str):
+            return None
+
+        text = payload.strip()
+        if not text:
+            return None
+        if cls._looks_like_ip(text):
+            return text
+        if text[:1] in "{[":
+            try:
+                candidate = cls._extract_ip_candidate(json.loads(text))
+                if candidate:
+                    return candidate
+            except Exception:
+                pass
+        normalized = (
+            text.replace("/", " ")
+            .replace("\\", " ")
+            .replace("=", " ")
+            .replace(":", " ")
+            .replace(",", " ")
+            .replace('"', " ")
+            .replace("'", " ")
+            .replace("(", " ")
+            .replace(")", " ")
+        )
+        for token in normalized.split():
+            if cls._looks_like_ip(token):
+                return token
+        return None
+
     def find_instance_by_name(self, name: str, *, start: int = 0, limit: int = 50) -> Optional[Dict[str, Any]]:
         """
         按名称匹配任务，返回“最新”的一条匹配记录。
@@ -306,15 +372,16 @@ class ContainerClient:
         acs_cfg = self._acs_cfg(reload=False)
         service_type = (acs_cfg.get("service_type") or "container").lower()
 
-        monitor = self.get_container_monitor(service_id)
-        info: Optional[Dict[str, Any]] = None
+        info: Dict[str, Any] = {}
+        try:
+            monitor = self.get_container_monitor(service_id)
+        except Exception:
+            monitor = None
         if isinstance(monitor, dict):
             if isinstance(monitor.get("data"), dict):
-                info = monitor["data"]
+                info = dict(monitor["data"])
             elif monitor:
-                info = monitor
-        if not info:
-            return None
+                info = dict(monitor)
 
         # 尝试使用 related-tasks 中最新的一条记录来确定开始时间/超时时间等
         latest_task: Optional[Dict[str, Any]] = None
@@ -370,12 +437,15 @@ class ContainerClient:
         if source_task.get("remainingTime"):
             info["remainingTime"] = source_task.get("remainingTime")
 
-        # IP：related-tasks/任务列表中如有，优先用；notebook 模式不调用 run-ips，只尝试 detail/字段；否则 run-ips 兜底
+        # IP：优先从已有任务/详情字段提取；container 模式再用 run-ips 兜底
         if not info.get("instanceIp"):
-            if source_task.get("instanceIp"):
-                info["instanceIp"] = source_task.get("instanceIp")
-            elif source_task.get("headerNotebookIp"):
-                info["instanceIp"] = source_task.get("headerNotebookIp")
+            candidate_ip = (
+                self._extract_ip_candidate(source_task)
+                or self._extract_ip_candidate(info)
+                or self._extract_ip_candidate(task)
+            )
+            if candidate_ip:
+                info["instanceIp"] = candidate_ip
             elif service_type != "notebook":
                 run_ips = self.get_run_ips(service_id)
                 ips = run_ips.get("data") or []

@@ -332,8 +332,10 @@
     const card = document.createElement('div');
     card.className = 'rounded-2xl border border-white/60 bg-white/80 shadow-sm shadow-slate-900/10 p-4 sm:p-5 space-y-3';
     card.dataset.index = idx.toString();
+    const acs = container.acs || {};
     const ssh = container.ssh || {};
     const restart = container.restart || {};
+    const serviceType = acs.service_type || 'container';
     card.innerHTML = `
       <div class="flex items-center justify-between gap-2">
         <div class="text-sm font-semibold text-slate-900">容器 #${idx + 1}</div>
@@ -385,6 +387,21 @@
     `;
     listEl.appendChild(card);
 
+    const settingsGrid = card.querySelector('.grid');
+    const restartField = card.querySelector('select[data-field="restart_strategy"]')?.closest('label');
+    if (settingsGrid && restartField) {
+      const serviceField = document.createElement('label');
+      serviceField.className = 'flex flex-col gap-1 text-xs text-slate-600';
+      serviceField.innerHTML = `
+        鏈嶅姟绫诲瀷
+        <select class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="service_type">
+          <option value="container" ${serviceType === 'notebook' ? '' : 'selected'}>container</option>
+          <option value="notebook" ${serviceType === 'notebook' ? 'selected' : ''}>notebook</option>
+        </select>
+      `;
+      settingsGrid.insertBefore(serviceField, restartField);
+    }
+
     const fList = card.querySelector('[data-list="forwards"]');
     const rList = card.querySelector('[data-list="reverse_forwards"]');
     const forwardData = Array.isArray(ssh.forwards) && ssh.forwards.length ? ssh.forwards : [{ local: '', remote: '' }];
@@ -406,6 +423,7 @@
       };
       const name = get('input[data-field="name"]').trim();
       const containerName = get('input[data-field="container_name"]').trim() || name;
+      const serviceType = get('select[data-field="service_type"]') || 'container';
       const restartStrategy = get('select[data-field="restart_strategy"]') || 'restart';
       const forwards = [];
       const fList = card.querySelector('[data-list="forwards"]');
@@ -437,6 +455,7 @@
         name,
         acs: {
           container_name: containerName,
+          service_type: serviceType,
         },
         restart: {
           strategy: restartStrategy || 'restart',

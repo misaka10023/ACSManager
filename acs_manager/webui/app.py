@@ -382,8 +382,9 @@ def container_ip(container_id: Optional[str] = Query(None)) -> dict:
     mgr = _resolve_manager(container_id)
     if mgr is None:
         raise HTTPException(status_code=503, detail="Manager not wired to web UI yet")
-    ip = mgr.snapshot().get("container_ip")
-    source = "captured"
+    snap = mgr.snapshot()
+    ip = snap.get("container_ip")
+    source = snap.get("ip_source") or "captured"
     if not ip:
         try:
             ip = mgr.resolve_container_ip(force_login=True)
@@ -411,6 +412,19 @@ def container_ip(container_id: Optional[str] = Query(None)) -> dict:
         if isinstance(seen, dt.datetime):
             payload["updated_at"] = seen.strftime("%Y-%m-%d %H:%M:%S")
     return payload
+
+
+@app.post("/containers/{container_id}/capture-event")
+async def capture_event(container_id: str, payload: dict = Body(..., embed=False), user: str = Depends(require_auth)) -> dict:
+    mgr = _resolve_manager(container_id)
+    if mgr is None:
+        raise HTTPException(status_code=404, detail="Container not found")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Payload must be an object")
+    ip = await mgr.ingest_capture_event(payload)
+    if not ip:
+        raise HTTPException(status_code=404, detail="No IP found in captured payload")
+    return {"ip": ip, "container_ip": ip, "source": "capture"}
 
 
 @app.post("/containers/{container_id}/restart")

@@ -14,11 +14,12 @@ class ContainerScopedStore:
 
     @staticmethod
     def _compact_container(container: Dict[str, Any], base_acs: Dict[str, Any]) -> Dict[str, Any]:
-        """Keep only name, minimal acs (container_name), ssh, and restart strategy."""
+        """Keep only name, minimal acs, ssh, and restart strategy."""
         name = container.get("name") or container.get("id")
         c_acs = container.get("acs", {}) if isinstance(container.get("acs"), dict) else {}
         compact_acs: Dict[str, Any] = {
             "container_name": c_acs.get("container_name") or name or base_acs.get("container_name"),
+            "service_type": c_acs.get("service_type") or "container",
         }
         ssh = container.get("ssh", {}) if isinstance(container.get("ssh"), dict) else {}
         restart_cfg = container.get("restart", {}) if isinstance(container.get("restart"), dict) else {}
@@ -55,10 +56,11 @@ class ContainerScopedStore:
             raise ValueError(f"Container {self.container_id} not found in config")
 
         base_acs_raw = root.get("acs", {}) if isinstance(root.get("acs"), dict) else {}
-        base_acs = {k: v for k, v in base_acs_raw.items() if k != "container_name"}
+        base_acs = {k: v for k, v in base_acs_raw.items() if k not in ("container_name", "service_type")}
         container_acs = container.get("acs", {}) if isinstance(container.get("acs"), dict) else {}
         merged_acs = dict(base_acs)
         merged_acs.update(container_acs)
+        merged_acs["service_type"] = merged_acs.get("service_type") or "container"
 
         merged = dict(container)
         merged["name"] = merged.get("name") or merged.get("id")
@@ -88,7 +90,7 @@ class ContainerScopedStore:
         root = self._read_root(reload=False)
         containers: List[Dict[str, Any]] = root.get("containers") or []
         base_acs = root.get("acs", {}) if isinstance(root.get("acs"), dict) else {}
-        base_acs = {k: v for k, v in base_acs.items() if k != "container_name"}
+        base_acs = {k: v for k, v in base_acs.items() if k not in ("container_name", "service_type")}
 
         change_acs = changes.get("acs") if isinstance(changes, dict) else None
         global_acs_delta: Dict[str, Any] = {}
@@ -96,7 +98,7 @@ class ContainerScopedStore:
         change_restart = changes.get("restart") if isinstance(changes, dict) else None
         if isinstance(change_acs, dict):
             for k, v in change_acs.items():
-                if k == "container_name":
+                if k in {"container_name", "service_type"}:
                     container_acs_delta[k] = v
                 else:
                     global_acs_delta[k] = v
@@ -144,7 +146,7 @@ class ContainerScopedStore:
         restart_delta = data.get("restart") if isinstance(data, dict) else None
         if isinstance(acs_in, dict):
             for k, v in acs_in.items():
-                if k == "container_name":
+                if k in {"container_name", "service_type"}:
                     container_acs_delta[k] = v
                 else:
                     global_acs_delta[k] = v
