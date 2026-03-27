@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import datetime as dt
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -199,6 +200,21 @@ class ContainerClient:
         url = self._url_api("/api/instance-service/task")
         return self._request_json("get", url, params={"start": start, "limit": limit, "sort": sort})
 
+    def list_notebook_tasks(
+        self,
+        start: int = 0,
+        limit: int = 20,
+        sort: str = "DESC",
+        *,
+        keyword: str = "",
+    ) -> Dict[str, Any]:
+        """获取 notebook/jupyter 任务列表：/api/tasks。"""
+        params: Dict[str, Any] = {"start": start, "limit": limit, "sort": sort}
+        if keyword:
+            params["keyWord"] = keyword
+        url = self._url_api("/api/tasks")
+        return self._request_json("get", url, params=params)
+
     def get_related_tasks(self, instance_service_id: str, start: int = 0, limit: int = 20, sort: str = "DESC") -> Dict[str, Any]:
         """
         获取指定 instanceServiceId 的相关任务列表（related-tasks）。
@@ -232,6 +248,56 @@ class ContainerClient:
         """获取容器运行状态详情（container-monitor 接口）。"""
         url = self._url_api(f"/api/instance/{instance_service_id}/container-monitor")
         return self._request_json("get", url)
+
+    def get_notebook_task_detail(self, task_id: str) -> Dict[str, Any]:
+        """获取 notebook/jupyter 任务详情：/api/tasks/{id}。"""
+        url = self._url_api(f"/api/tasks/{task_id}")
+        return self._request_json("get", url)
+
+    def get_task_instance(
+        self,
+        task_id: str,
+        container_type: str = "worker",
+        container_index: int = 0,
+    ) -> Dict[str, Any]:
+        """获取 notebook/jupyter 任务实例详情：/api/tasks/{id}/instances/{type}/{index}。"""
+        url = self._url_api(f"/api/tasks/{task_id}/instances/{container_type}/{container_index}")
+        return self._request_json("get", url)
+
+    def _service_type(self, *, reload: bool = False) -> str:
+        return str(self._acs_cfg(reload=reload).get("service_type") or "container").strip().lower()
+
+    @staticmethod
+    def _task_items(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        if isinstance(data, dict):
+            nested = data.get("data")
+            if isinstance(nested, list):
+                return [item for item in nested if isinstance(item, dict)]
+        return []
+
+    @staticmethod
+    def _task_name(item: Dict[str, Any], *keys: str) -> str:
+        for key in keys:
+            value = str(item.get(key, "")).strip()
+            if value:
+                return value
+        return ""
+
+    @staticmethod
+    def _parse_task_time(item: Dict[str, Any]) -> dt.datetime:
+        for key in ("startTime", "createTime"):
+            value = item.get(key)
+            if not value:
+                continue
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
+                try:
+                    return dt.datetime.strptime(str(value), fmt)
+                except ValueError:
+                    continue
+        return dt.datetime.min
 
     @staticmethod
     def _looks_like_ip(value: Any) -> bool:
@@ -298,7 +364,7 @@ class ContainerClient:
                 return token
         return None
 
-    def find_instance_by_name(self, name: str, *, start: int = 0, limit: int = 50) -> Optional[Dict[str, Any]]:
+    def find_instance_by_name(self, name: str, *, start: int = 0, limit: int = 200) -> Optional[Dict[str, Any]]:
         """
         按名称匹配任务，返回“最新”的一条匹配记录。
 
@@ -307,43 +373,151 @@ class ContainerClient:
         - 若没有完全相等，再从“前缀/包含”匹配的候选中挑选；
         - 在候选集中按 startTime/createTime 解析后的时间排序，返回最新一条。
         """
-        target_raw = name.strip()
-        target = target_raw.lower()
-        data = self.list_tasks(start=start, limit=limit)
-        exact: List[Dict[str, Any]] = []
-        fuzzy: List[Dict[str, Any]] = []
-        for item in data.get("data", []):
-            for key in ("instanceServiceName", "taskName", "notebookName", "name"):
-                cand = str(item.get(key, "")).strip()
-                cand_l = cand.lower()
-                if not cand:
-                    continue
-                if cand_l == target:
-                    exact.append(item)
-                    break
-                if cand_l.startswith(target) or target in cand_l:
-                    fuzzy.append(item)
-                    break
-        candidates: List[Dict[str, Any]] = exact or fuzzy
-        if not candidates:
-            return None
+        target = name.strip().lower()
+        service_type = self._service_type(reload=False)
+        sources: List[tuple[str, List[Dict[str, Any]], tuple[str, ...]]] = []
+        if service_type == "notebook":
+            try:
+                notebook_items = self._task_items(self.list_notebook_tasks(start=start, limit=limit))
+            except Exception:
+                notebook_items = []
+            sources.append(("notebook", notebook_items, ("taskName", "name")))
+        try:
+            container_items = self._task_items(self.list_tasks(start=start, limit=limit))
+        except Exception:
+            container_items = []
+        sources.append(("container", container_items, ("instanceServiceName", "taskName", "notebookName", "name")))
 
-        def _parse_time(item: Dict[str, Any]) -> dt.datetime:
-            for k in ("startTime", "createTime"):
-                v = item.get(k)
-                if not v:
-                    continue
-                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
-                    try:
-                        return dt.datetime.strptime(str(v), fmt)
-                    except ValueError:
+        for source_name, items, name_keys in sources:
+            if not items:
+                continue
+            exact: List[Dict[str, Any]] = []
+            fuzzy: List[Dict[str, Any]] = []
+            for item in items:
+                for key in name_keys:
+                    cand = str(item.get(key, "")).strip()
+                    cand_l = cand.lower()
+                    if not cand:
                         continue
-            # 无法解析时间时，放到最旧
-            return dt.datetime.min
+                    alias = re.sub(r"_\d+$", "", cand_l) if source_name == "notebook" else cand_l
+                    if cand_l == target or alias == target:
+                        exact.append(item)
+                        break
+                    if cand_l.startswith(target) or alias.startswith(target) or target in cand_l:
+                        fuzzy.append(item)
+                        break
+            candidates = exact or fuzzy
+            if candidates:
+                return max(candidates, key=self._parse_task_time)
+        return None
 
-        # 选出时间最新的候选
-        best = max(candidates, key=_parse_time)
-        return best
+    def list_task_suggestions(self, *, limit: int = 200) -> List[Dict[str, Any]]:
+        """Return merged task suggestions for Web UI autocomplete."""
+        suggestions: List[Dict[str, Any]] = []
+        seen: set[tuple[str, str, str]] = set()
+
+        def _append(items: List[Dict[str, Any]], service_type: str, *name_keys: str) -> None:
+            for item in items:
+                name = self._task_name(item, *name_keys)
+                if not name:
+                    continue
+                task_id = str(item.get("instanceServiceId") or item.get("id") or item.get("taskId") or "")
+                key = (service_type, name, task_id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                suggestions.append(
+                    {
+                        "name": name,
+                        "status": item.get("status"),
+                        "id": task_id or None,
+                        "task_type": item.get("taskType"),
+                        "service_type": service_type,
+                        "createTime": item.get("createTime"),
+                        "startTime": item.get("startTime"),
+                    }
+                )
+
+        try:
+            _append(
+                self._task_items(self.list_tasks(start=0, limit=limit, sort="DESC")),
+                "container",
+                "instanceServiceName",
+                "taskName",
+                "notebookName",
+                "name",
+            )
+        except Exception:
+            pass
+        try:
+            _append(
+                self._task_items(self.list_notebook_tasks(start=0, limit=limit, sort="DESC")),
+                "notebook",
+                "taskName",
+                "name",
+            )
+        except Exception:
+            pass
+        suggestions.sort(key=self._parse_task_time, reverse=True)
+        return suggestions
+
+    def _get_notebook_instance_info(self, task: Dict[str, Any], task_id: str) -> Dict[str, Any]:
+        detail_data: Optional[Dict[str, Any]] = None
+        try:
+            detail = self.get_notebook_task_detail(task_id)
+            raw = detail.get("data") if isinstance(detail, dict) else None
+            if isinstance(raw, dict) and raw:
+                detail_data = raw
+        except Exception:
+            detail_data = None
+
+        source_task = detail_data or task
+        info: Dict[str, Any] = {}
+        instance_data: Optional[Dict[str, Any]] = None
+        for container_type in ("worker", "ps"):
+            try:
+                instance = self.get_task_instance(task_id, container_type=container_type, container_index=0)
+            except Exception:
+                continue
+            raw = instance.get("data") if isinstance(instance, dict) else None
+            if isinstance(raw, dict) and raw:
+                instance_data = raw
+                info.update(raw)
+                info["containerType"] = raw.get("containerType") or container_type
+                break
+
+        for key in ("status", "taskStatus"):
+            if source_task.get(key):
+                info["status"] = source_task.get(key)
+                break
+        if instance_data and instance_data.get("status"):
+            info["status"] = instance_data.get("status")
+
+        for key in ("startTime", "createTime"):
+            if source_task.get(key):
+                info["startTime"] = source_task.get(key)
+                break
+        if source_task.get("timeoutLimit"):
+            info["timeoutLimit"] = source_task.get("timeoutLimit")
+        remaining = source_task.get("remainTime") or source_task.get("remainingTime")
+        if remaining:
+            info["remainingTime"] = remaining
+
+        candidate_ip = (
+            self._extract_ip_candidate(instance_data)
+            or self._extract_ip_candidate(source_task)
+            or self._extract_ip_candidate(task)
+        )
+        if candidate_ip:
+            info["instanceIp"] = candidate_ip
+            info["ipSource"] = "api.tasks.instance"
+
+        info["instanceServiceId"] = task_id
+        if source_task.get("taskId"):
+            info["taskId"] = source_task.get("taskId")
+        if source_task.get("taskName"):
+            info["taskName"] = source_task.get("taskName")
+        return info
 
     def get_container_instance_info_by_name(self, name: str) -> Optional[Dict[str, Any]]:
         """
@@ -369,8 +543,10 @@ class ContainerClient:
         service_id = task.get("instanceServiceId") or task.get("id")
         if not service_id:
             return None
-        acs_cfg = self._acs_cfg(reload=False)
-        service_type = (acs_cfg.get("service_type") or "container").lower()
+        service_type = self._service_type(reload=False)
+
+        if service_type == "notebook":
+            return self._get_notebook_instance_info(task, str(service_id))
 
         info: Dict[str, Any] = {}
         try:
@@ -382,6 +558,8 @@ class ContainerClient:
                 info = dict(monitor["data"])
             elif monitor:
                 info = dict(monitor)
+        if info.get("instanceIp") and not info.get("ipSource"):
+            info["ipSource"] = "api.instance-service.monitor"
 
         # 尝试使用 related-tasks 中最新的一条记录来确定开始时间/超时时间等
         latest_task: Optional[Dict[str, Any]] = None
@@ -446,11 +624,13 @@ class ContainerClient:
             )
             if candidate_ip:
                 info["instanceIp"] = candidate_ip
+                info["ipSource"] = "api.instance-service.detail"
             elif service_type != "notebook":
                 run_ips = self.get_run_ips(service_id)
                 ips = run_ips.get("data") or []
                 if ips:
                     info["instanceIp"] = ips[0].get("instanceIp")
+                    info["ipSource"] = "api.instance-service.run-ips"
 
         info["instanceServiceId"] = service_id
         return info

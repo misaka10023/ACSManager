@@ -19,7 +19,8 @@
 - **ACS API 客户端 (`acs_manager.container.client.ContainerClient`)**
   - 使用配置中的 Base64 公钥对密码做 RSA 加密，调用 `/login/loginAuth.action` 登录 ACS。
   - 支持配置中直接复用 `JSESSIONID` / `GV_JSESSIONID`（`acs.cookies` 不为空时跳过登录）。
-  - 调用 `/sothisai/api/instance-service/task`、`/sothisai/api/instance-service/related-tasks`、`/sothisai/api/instance/{id}/container-monitor`、`/sothisai/api/instance-service/{id}/run-ips` 查询任务列表、容器状态和 IP；当 related-tasks 不返回数据时会尝试 `/sothisai/api/instance-service/{id}/detail` 作为兜底获取最新记录/IP 线索。
+  - `container` 模式调用 `/sothisai/api/instance-service/task`、`/sothisai/api/instance-service/related-tasks`、`/sothisai/api/instance/{id}/container-monitor`、`/sothisai/api/instance-service/{id}/run-ips` 查询任务列表、容器状态和 IP；当 related-tasks 不返回数据时会尝试 `/sothisai/api/instance-service/{id}/detail` 作为兜底获取最新记录/IP 线索。
+  - `notebook` 模式调用 `/sothisai/api/tasks` 查任务，再通过 `/sothisai/api/tasks/{id}/instances/worker/0` 获取运行实例 IP（如 `containerIp`）。
   - 登录成功后会自动把最新 cookies 写回配置文件（`acs.cookies`），方便后续复用；解析到新 IP 时会写回对应容器的 `ssh.container_ip` 作为下次的兜底。
 
 - **容器生命周期 + SSH 隧道管理 (`acs_manager.management.controller.ContainerManager`)**
@@ -274,7 +275,7 @@ curl -X PATCH http://localhost:8000/config \
 - 推荐使用 `containers` 列表，每个元素包含独立的 `acs` 与 `ssh` 段（参见 `config/examples/settings.example.yaml`）；容器的 `name` 既是唯一标识也是展示名称。
 - 每个容器都可以配置自己的端口、转发、登录方式、fallback `ssh.container_ip`；发现新 IP 时会写回对应容器的 `ssh.container_ip` 便于下次直连。
 - 若老配置仍是单一 `acs`/`ssh` 段，会自动视为一个容器。
-- `acs.service_type`：`container`（默认）或 `notebook`。`notebook` 仅使用 detail 接口，无法通过 API 解析 IP，必须填好对应容器的 `ssh.container_ip` 才能启隧道。
+- `acs.service_type`：`container`（默认）或 `notebook`。`notebook` 会优先走 `/sothisai/api/tasks -> /instances/worker/0` 自动解析 IP；`ssh.container_ip` 仅作为解析失败时的兜底。
 - 重启策略：`restart.strategy` 可选 `restart`（默认，重启原任务）或 `recreate`（新建任务，命名为 `名称_次数_时间戳`）；新建计数/时间戳存于本地 state 文件，用户无需手动修改。
 
 ### `acs` 段

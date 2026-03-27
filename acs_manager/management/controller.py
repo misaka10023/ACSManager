@@ -117,7 +117,6 @@ class ContainerManager:
         if not name:
             logger.warning("acs.container_name not configured or placeholder; cannot auto-resolve IP.")
             return None
-        ssh_cfg = self._ssh_cfg(reload=False)
         if force_login:
             try:
                 self.container_client.login()
@@ -133,7 +132,13 @@ class ContainerManager:
             ip = info["instanceIp"]
             self.state["container_ip"] = ip
             self.state["last_seen"] = dt.datetime.now()
-            self.state["ip_source"] = "api"
+            self.state["ip_source"] = info.get("ipSource") or "api"
+            if info.get("status"):
+                self.state["container_status"] = info.get("status")
+            if info.get("startTime"):
+                self.state["container_start_time"] = info.get("startTime")
+            if info.get("remainingTime"):
+                self.state["remaining_time_str"] = info.get("remainingTime")
             logger.info("Resolved container IP via API: %s", ip)
             return ip
         logger.warning("Could not resolve container %s IP from API.", name)
@@ -840,6 +845,12 @@ done
     def snapshot(self) -> Dict[str, Any]:
         """获取当前状态（供 Web UI 展示）。"""
         snap = dict(self.state)
+        try:
+            acs_cfg = self._acs_cfg(reload=False)
+            snap["configured_container_name"] = acs_cfg.get("container_name")
+            snap["service_type"] = (acs_cfg.get("service_type") or "container").lower()
+        except Exception:
+            pass
         if not snap.get("container_ip"):
             try:
                 ssh_cfg = self._ssh_cfg(reload=False)

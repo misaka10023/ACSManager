@@ -48,7 +48,10 @@
     const datalist = document.getElementById('acs-task-options');
     if (!datalist) return;
     datalist.innerHTML = (list || [])
-      .map((t) => `<option value="${t.name}">${t.name}${t.status ? ` (${t.status})` : ''}</option>`)
+      .map((t) => {
+        const meta = [t.service_type || t.task_type, t.status].filter(Boolean).join(' / ');
+        return `<option value="${t.name}">${t.name}${meta ? ` (${meta})` : ''}</option>`;
+      })
       .join('');
   }
 
@@ -76,18 +79,23 @@
         const cid = c.id || c.name || 'unknown';
         const name = c.name || cid;
         const ip = c.container_ip || 'unknown';
+        const source = c.ip_source || 'unknown';
         const status = c.container_status || 'unknown';
+        const serviceType = c.service_type || 'container';
         const tunnel = c.tunnel_status || 'stopped';
         const lastSeen = c.last_seen || '';
         const remaining = c.remaining_time_str || '';
+        const configuredName = c.configured_container_name || '';
         return `
           <div class="rounded-2xl border border-white/60 bg-white/80 shadow-sm shadow-slate-900/10 p-4 flex flex-col gap-2">
             <div class="flex items-center justify-between gap-2">
               <div class="font-semibold truncate text-slate-900" title="${name}">${name}</div>
               <div class="text-xs text-slate-500">Tunnel: ${tunnel}</div>
             </div>
+            <div class="text-xs text-slate-600">Type: ${serviceType}</div>
+            ${configuredName ? `<div class="text-xs text-slate-500 truncate">ACS name: <span class="font-mono">${configuredName}</span></div>` : ''}
             <div class="text-xs text-slate-600">Status: ${status}</div>
-            <div class="text-xs text-slate-600 truncate">IP: <span class="font-mono">${ip}</span></div>
+            <div class="text-xs text-slate-600 truncate">IP: <span class="font-mono">${ip}</span> <span class="text-slate-400">(${source})</span></div>
             ${remaining ? `<div class="text-xs text-slate-600">剩余时间: ${remaining}</div>` : ''}
             ${lastSeen ? `<div class="text-xs text-slate-500">Last seen: ${lastSeen}</div>` : ''}
             <div class="mt-2 grid grid-cols-2 gap-2 text-[13px]">
@@ -345,8 +353,9 @@
         <label class="flex flex-col gap-1 text-xs text-slate-600">名称(name)
           <input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="name" value="${container.name || ''}">
         </label>
-        <label class="flex flex-col gap-1 text-xs text-slate-600">ACS 容器名
+        <label class="flex flex-col gap-1 text-xs text-slate-600">ACS 任务名/实例名
           <input type="text" list="acs-task-options" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="container_name" value="${(container.acs && container.acs.container_name) || ''}">
+          <span class="text-[11px] text-slate-400">notebook 模式可填基础名，如 Notebook_2603274032；后端会自动匹配到实际副本名。</span>
         </label>
         <label class="flex flex-col gap-1 text-xs text-slate-600">重启策略
           <select class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="restart_strategy">
@@ -368,7 +377,7 @@
         <label class="flex flex-col gap-1 text-xs text-slate-600">容器 SSH 端口<input type="number" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="container_port" value="${ssh.container_port ?? ''}"></label>
         <label class="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-200" data-field="password_login" ${ssh.password_login ? 'checked' : ''}>密码登录</label>
         <label class="flex flex-col gap-1 text-xs text-slate-600">密码<input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="password" value="${ssh.password || ''}"></label>
-        <label class="flex flex-col gap-1 text-xs text-slate-600">容器 IP(兜底)<input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="container_ip" value="${ssh.container_ip || ''}"></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">容器 IP(兜底)<input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="container_ip" value="${ssh.container_ip || ''}"><span class="text-[11px] text-slate-400">自动解析失败时才需要手填；notebook 模式会优先走 /api/tasks/instances/worker/0。</span></label>
       </div>
       <div class="space-y-2">
         <div class="flex items-center justify-between text-xs text-slate-600">
@@ -393,11 +402,12 @@
       const serviceField = document.createElement('label');
       serviceField.className = 'flex flex-col gap-1 text-xs text-slate-600';
       serviceField.innerHTML = `
-        鏈嶅姟绫诲瀷
+        服务类型
         <select class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="service_type">
           <option value="container" ${serviceType === 'notebook' ? '' : 'selected'}>container</option>
           <option value="notebook" ${serviceType === 'notebook' ? 'selected' : ''}>notebook</option>
         </select>
+        <span class="text-[11px] text-slate-400">container 使用 instance-service；notebook 使用 /api/tasks。</span>
       `;
       settingsGrid.insertBefore(serviceField, restartField);
     }

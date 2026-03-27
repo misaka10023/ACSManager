@@ -355,20 +355,7 @@ def list_acs_tasks(user: str = Depends(require_auth)) -> dict:
     """
     mgr = _any_container_client()
     try:
-        resp = mgr.container_client.list_tasks(start=0, limit=200, sort="DESC")
-        items = resp.get("data") if isinstance(resp, dict) else []
-        tasks = []
-        for item in items or []:
-            name = item.get("instanceServiceName") or item.get("name")
-            if not name:
-                continue
-            tasks.append(
-                {
-                    "name": name,
-                    "status": item.get("status"),
-                    "id": item.get("instanceServiceId") or item.get("id"),
-                }
-            )
+        tasks = mgr.container_client.list_task_suggestions(limit=200)
         return {"tasks": tasks}
     except HTTPException:
         raise
@@ -384,22 +371,14 @@ def container_ip(container_id: Optional[str] = Query(None)) -> dict:
         raise HTTPException(status_code=503, detail="Manager not wired to web UI yet")
     snap = mgr.snapshot()
     ip = snap.get("container_ip")
-    source = snap.get("ip_source") or "captured"
+    source = snap.get("ip_source") or "unknown"
     if not ip:
         try:
             ip = mgr.resolve_container_ip(force_login=True)
-            source = "api"
+            snap = mgr.snapshot()
+            source = snap.get("ip_source") or "api"
         except Exception:
             ip = None
-        if not ip and config_store:
-            settings = config_store.read(reload=True)
-            fallback = settings.get("ssh", {}).get("container_ip")
-            if fallback:
-                return {
-                    "container_ip": fallback,
-                    "ip": fallback,
-                    "source": "fallback",
-                }
         if not ip:
             raise HTTPException(status_code=404, detail="Container IP not available yet")
     payload = {
@@ -460,7 +439,8 @@ def refresh_ip(container_id: str, user: str = Depends(require_auth)) -> dict:
     if mgr is None:
         raise HTTPException(status_code=404, detail="Container not found")
     ip = mgr.resolve_container_ip(force_login=True)
-    return {"ip": ip, "container_ip": ip}
+    snap = mgr.snapshot()
+    return {"ip": ip, "container_ip": ip, "source": snap.get("ip_source") or "api"}
 
 
 @app.post("/containers/{container_id}/restart-container")
