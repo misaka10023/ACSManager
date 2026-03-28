@@ -455,6 +455,25 @@ async def restart_container_api(container_id: str, user: str = Depends(require_a
     return {"status": "container_restarting"}
 
 
+@app.post("/containers/{container_id}/tasks/{task_id}/run")
+async def run_container_task(
+    container_id: str,
+    task_id: str,
+    force: bool = Query(False),
+    user: str = Depends(require_auth),
+) -> dict:
+    mgr = _resolve_manager(container_id)
+    if mgr is None:
+        raise HTTPException(status_code=404, detail="Container not found")
+    try:
+        return await mgr.execute_task(task_id, force=force, reason="manual")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error("Failed to execute task %s for %s: %s", task_id, container_id, exc)
+        raise HTTPException(status_code=500, detail=f"Failed to execute task: {exc}")
+
+
 @app.get("/config")
 def get_config(reload: bool = True, user: str = Depends(require_auth)) -> dict:
     if config_store is None:
@@ -486,6 +505,57 @@ def _critical_snapshot(cfg: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _container_critical_map(cfg: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    containers = cfg.get("containers") or []
+    base_acs = cfg.get("acs", {}) if isinstance(cfg.get("acs"), dict) else {}
+    snapshots: Dict[str, Dict[str, Any]] = {}
+
+    if isinstance(containers, list) and containers:
+        for idx, container in enumerate(containers):
+            if not isinstance(container, dict):
+                continue
+            cid = str(container.get("name") or container.get("id") or f"c{idx+1}")
+            acs_cfg = dict(base_acs)
+            if isinstance(container.get("acs"), dict):
+                acs_cfg.update(container.get("acs") or {})
+            ssh_cfg = container.get("ssh", {}) if isinstance(container.get("ssh"), dict) else {}
+            snapshots[cid] = {
+                "acs.container_name": acs_cfg.get("container_name"),
+                "acs.service_type": acs_cfg.get("service_type"),
+                "ssh.mode": ssh_cfg.get("mode"),
+                "ssh.bastion_host": ssh_cfg.get("bastion_host"),
+                "ssh.bastion_user": ssh_cfg.get("bastion_user"),
+                "ssh.target_user": ssh_cfg.get("target_user"),
+                "ssh.port": ssh_cfg.get("port"),
+                "ssh.container_port": ssh_cfg.get("container_port"),
+                "ssh.password_login": ssh_cfg.get("password_login"),
+                "ssh.password": ssh_cfg.get("password"),
+                "ssh.forwards": ssh_cfg.get("forwards"),
+                "ssh.reverse_forwards": ssh_cfg.get("reverse_forwards"),
+                "ssh.container_ip": ssh_cfg.get("container_ip"),
+            }
+        return snapshots
+
+    ssh_cfg = cfg.get("ssh", {}) if isinstance(cfg.get("ssh"), dict) else {}
+    legacy_id = str(base_acs.get("container_name") or "default")
+    snapshots[legacy_id] = {
+        "acs.container_name": base_acs.get("container_name"),
+        "acs.service_type": base_acs.get("service_type"),
+        "ssh.mode": ssh_cfg.get("mode"),
+        "ssh.bastion_host": ssh_cfg.get("bastion_host") or ssh_cfg.get("remote_server_ip"),
+        "ssh.bastion_user": ssh_cfg.get("bastion_user"),
+        "ssh.target_user": ssh_cfg.get("target_user"),
+        "ssh.port": ssh_cfg.get("port"),
+        "ssh.container_port": ssh_cfg.get("container_port"),
+        "ssh.password_login": ssh_cfg.get("password_login"),
+        "ssh.password": ssh_cfg.get("password"),
+        "ssh.forwards": ssh_cfg.get("forwards"),
+        "ssh.reverse_forwards": ssh_cfg.get("reverse_forwards"),
+        "ssh.container_ip": ssh_cfg.get("container_ip"),
+    }
+    return snapshots
+
+
 def _manager_enabled_for_auto_tasks(mgr: ContainerManager) -> bool:
     try:
         return mgr.configured_container_name(reload=True) is not None
@@ -498,23 +568,10 @@ async def _post_config_change(old_cfg: Dict[str, Any], new_cfg: Dict[str, Any]) 
     if "containers" in new_cfg:
         if multi_manager:
             await multi_manager.sync_managers()
-            targets = list(multi_manager.managers.values())
         elif manager:
-            targets = [manager]
+            pass
         else:
             return
-        for mgr in targets:
-            if not _manager_enabled_for_auto_tasks(mgr):
-                logger.info(
-                    "Skip tunnel restart for %s (placeholder container name).",
-                    getattr(mgr, "container_id", "unknown"),
-                )
-                continue
-            try:
-                await mgr.restart_tunnel()
-            except Exception as exc:
-                logger.error("Failed to restart tunnel (%s): %s", getattr(mgr, "container_id", "unknown"), exc)
-        return
 
     targets: list[ContainerManager] = []
     if multi_manager:
@@ -547,19 +604,25 @@ async def _post_config_change(old_cfg: Dict[str, Any], new_cfg: Dict[str, Any]) 
             except Exception as exc:  # pragma: no cover
                 logger.error("Failed to refresh ACS cookies (%s): %s", getattr(mgr, "container_id", "unknown"), exc)
 
-    if ssh_changed:
-        for mgr in targets:
-            if not _manager_enabled_for_auto_tasks(mgr):
-                logger.info(
-                    "SSH config updated but container name is placeholder; skip tunnel restart for %s.",
-                    getattr(mgr, "container_id", "unknown"),
-                )
-                continue
-            try:
-                logger.info("SSH config changed; restarting tunnel.")
-                await mgr.restart_tunnel()
-            except Exception as exc:  # pragma: no cover
-                logger.error("Failed to restart SSH tunnel (%s): %s", getattr(mgr, "container_id", "unknown"), exc)
+    old_container_map = _container_critical_map(old_cfg)
+    new_container_map = _container_critical_map(new_cfg)
+
+    for mgr in targets:
+        if not _manager_enabled_for_auto_tasks(mgr):
+            logger.info(
+                "SSH config updated but container name is placeholder; skip tunnel restart for %s.",
+                getattr(mgr, "container_id", "unknown"),
+            )
+            continue
+        cid = getattr(mgr, "container_id", "")
+        container_changed = old_container_map.get(cid) != new_container_map.get(cid)
+        if not ssh_changed and not container_changed:
+            continue
+        try:
+            logger.info("Container transport config changed; restarting tunnel for %s.", cid)
+            await mgr.restart_tunnel()
+        except Exception as exc:  # pragma: no cover
+            logger.error("Failed to restart SSH tunnel (%s): %s", getattr(mgr, "container_id", "unknown"), exc)
 
 
 @app.patch("/config")

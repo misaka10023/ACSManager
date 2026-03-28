@@ -38,6 +38,7 @@ class MultiContainerManager:
         - Global `acs` is shared.
         - Each container keeps only `acs.container_name` + `acs.service_type`.
         - Migrate ssh.remote_server_ip -> ssh.bastion_host.
+        - Preserve container task definitions.
         """
         try:
             root = self.base_store.read(reload=True)
@@ -64,6 +65,7 @@ class MultiContainerManager:
                 if not ssh_clean.get("bastion_host") and ssh_clean.get("remote_server_ip"):
                     ssh_clean["bastion_host"] = ssh_clean.get("remote_server_ip")
                 ssh_clean.pop("remote_server_ip", None)
+                tasks_raw = c.get("tasks", []) if isinstance(c.get("tasks"), list) else []
                 restart_cfg = c.get("restart", {}) if isinstance(c.get("restart"), dict) else {}
                 restart_clean = {}
                 if isinstance(restart_cfg, dict) and restart_cfg.get("strategy"):
@@ -73,6 +75,7 @@ class MultiContainerManager:
                         "name": name,
                         "acs": acs_override,
                         "ssh": ssh_clean,
+                        "tasks": tasks_raw,
                         "restart": restart_clean,
                     }
                 )
@@ -91,6 +94,7 @@ class MultiContainerManager:
                     "name": (root.get("acs", {}) or {}).get("container_name") or "default",
                     "acs": root.get("acs", {}),
                     "ssh": root.get("ssh", {}),
+                    "tasks": root.get("tasks", []),
                 }
             ]
         profiles: List[Dict[str, Any]] = []

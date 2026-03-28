@@ -51,3 +51,36 @@ class RuntimeStateStore:
             data["containers"] = containers
             self._write(data)
             return dict(merged)
+
+    def read_task(self, container_id: str, task_id: str) -> Dict[str, Any]:
+        container_state = self.read_container(container_id)
+        tasks = container_state.get("tasks") or {}
+        if not isinstance(tasks, dict):
+            return {}
+        entry = tasks.get(str(task_id), {}) or {}
+        return dict(entry) if isinstance(entry, dict) else {}
+
+    def update_task(self, container_id: str, task_id: str, changes: Dict[str, Any]) -> Dict[str, Any]:
+        with self._lock:
+            data = self._read()
+            containers = data.get("containers")
+            if not isinstance(containers, dict):
+                containers = {}
+            current_container = containers.get(str(container_id), {})
+            if not isinstance(current_container, dict):
+                current_container = {}
+            tasks = current_container.get("tasks")
+            if not isinstance(tasks, dict):
+                tasks = {}
+            current_task = tasks.get(str(task_id), {})
+            if not isinstance(current_task, dict):
+                current_task = {}
+            merged = dict(current_task)
+            merged.update(changes)
+            tasks[str(task_id)] = merged
+            current_container = dict(current_container)
+            current_container["tasks"] = tasks
+            containers[str(container_id)] = current_container
+            data["containers"] = containers
+            self._write(data)
+            return dict(merged)

@@ -14,7 +14,7 @@ class ContainerScopedStore:
 
     @staticmethod
     def _compact_container(container: Dict[str, Any], base_acs: Dict[str, Any]) -> Dict[str, Any]:
-        """Keep only name, minimal acs, ssh, and restart strategy."""
+        """Keep only name, minimal acs, ssh, tasks, and restart strategy."""
         name = container.get("name") or container.get("id")
         c_acs = container.get("acs", {}) if isinstance(container.get("acs"), dict) else {}
         compact_acs: Dict[str, Any] = {
@@ -22,11 +22,14 @@ class ContainerScopedStore:
             "service_type": c_acs.get("service_type") or "container",
         }
         ssh = container.get("ssh", {}) if isinstance(container.get("ssh"), dict) else {}
+        tasks = container.get("tasks", [])
+        if not isinstance(tasks, list):
+            tasks = []
         restart_cfg = container.get("restart", {}) if isinstance(container.get("restart"), dict) else {}
         restart_clean: Dict[str, Any] = {}
         if restart_cfg.get("strategy"):
             restart_clean["strategy"] = restart_cfg.get("strategy")
-        payload: Dict[str, Any] = {"name": name, "acs": compact_acs, "ssh": ssh}
+        payload: Dict[str, Any] = {"name": name, "acs": compact_acs, "ssh": ssh, "tasks": tasks}
         if restart_clean:
             payload["restart"] = restart_clean
         return payload
@@ -66,6 +69,7 @@ class ContainerScopedStore:
         merged["name"] = merged.get("name") or merged.get("id")
         merged["acs"] = merged_acs
         merged["ssh"] = container.get("ssh", {})
+        merged["tasks"] = container.get("tasks", []) if isinstance(container.get("tasks"), list) else []
         restart_cfg = container.get("restart", {}) if isinstance(container.get("restart"), dict) else {}
         merged["restart"] = {
             "strategy": (restart_cfg.get("strategy") or "restart"),

@@ -34,6 +34,7 @@ containers:
       forwards: []                       # 正向转发列表 (-L)，如 {"local": 8080, "remote": 80}
       reverse_forwards: []               # 反向转发列表 (-R)，支持 {"local":8080,"remote":80,"mid":58080}
       container_ip: ""                   # 可选兜底 IP；自动解析失败时可先手填，后续新 IP 会写回
+    tasks: []                            # 容器任务列表；支持 auto_on_start/manual、tmux/nohup/shell
 
 # 可按需继续添加更多容器
 #  - name: "Another"
@@ -54,6 +55,18 @@ containers:
 #      forwards: []
 #      reverse_forwards: []
 #      container_ip: ""
+#    tasks:
+#      - id: "start-comfyui"             # 任务唯一 ID；为空时 WebUI 会自动生成
+#        title: "启动 ComfyUI"            # 仪表盘展示名称
+#        enabled: true                   # 是否启用该任务
+#        trigger: "auto_on_start"        # auto_on_start|manual
+#        mode: "ensure_running"          # ensure_running|once
+#        workdir: "/workspace/ComfyUI"   # 远端执行前切换到的目录
+#        command: "python main.py --listen 0.0.0.0 --port 8188"  # 实际执行命令
+#        log_file: "/workspace/logs/comfyui.log" # 可选日志文件
+#        runner:
+#          type: "tmux"                  # tmux|nohup|shell
+#          session: "comfyui"            # tmux session 名；tmux 模式建议填写
 
 webui:
   host: "0.0.0.0"                        # Web UI 绑定地址

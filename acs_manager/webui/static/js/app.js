@@ -67,6 +67,37 @@
     }
   }
 
+  function taskLabel(task) {
+    const parts = [];
+    if (task.trigger === 'auto_on_start') parts.push('自动');
+    if (task.mode === 'ensure_running') parts.push('保活');
+    parts.push(task.runner_type || task.runner?.type || 'nohup');
+    return parts.join(' / ');
+  }
+
+  function renderTaskSummary(containerId, task) {
+    const status = task.last_status || 'idle';
+    const message = task.last_message || '';
+    const meta = taskLabel(task);
+    return `
+      <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-3 space-y-2">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <div class="text-sm font-medium text-slate-900 truncate">${task.title || task.id}</div>
+            <div class="text-[11px] text-slate-500 break-all">${task.id}</div>
+          </div>
+          <div class="text-[11px] text-slate-500 whitespace-nowrap">${meta}</div>
+        </div>
+        <div class="text-xs text-slate-600">状态: ${status}${task.last_run_at ? ` · ${task.last_run_at}` : ''}</div>
+        ${message ? `<div class="text-xs text-slate-500 break-words">${message}</div>` : ''}
+        <div class="flex items-center justify-between gap-2">
+          ${task.log_file ? `<div class="text-[11px] text-slate-400 truncate" title="${task.log_file}">${task.log_file}</div>` : '<div></div>'}
+          <button class="btn btn-secondary btn-xxs" data-action="run-task" data-id="${containerId}" data-task-id="${task.id}">执行任务</button>
+        </div>
+      </div>
+    `;
+  }
+
   function renderContainers(containers) {
     const listEl = document.getElementById('containers-list');
     if (!listEl) return;
@@ -86,6 +117,7 @@
         const lastSeen = c.last_seen || '';
         const remaining = c.remaining_time_str || '';
         const configuredName = c.configured_container_name || '';
+        const taskList = Array.isArray(c.tasks) ? c.tasks : [];
         return `
           <div class="rounded-2xl border border-white/60 bg-white/80 shadow-sm shadow-slate-900/10 p-4 flex flex-col gap-2">
             <div class="flex items-center justify-between gap-2">
@@ -98,6 +130,14 @@
             <div class="text-xs text-slate-600 truncate">IP: <span class="font-mono">${ip}</span> <span class="text-slate-400">(${source})</span></div>
             ${remaining ? `<div class="text-xs text-slate-600">剩余时间: ${remaining}</div>` : ''}
             ${lastSeen ? `<div class="text-xs text-slate-500">Last seen: ${lastSeen}</div>` : ''}
+            ${
+              taskList.length
+                ? `<div class="mt-2 space-y-2">
+                    <div class="text-xs font-semibold text-slate-700">任务</div>
+                    <div class="space-y-2">${taskList.map((task) => renderTaskSummary(cid, task)).join('')}</div>
+                  </div>`
+                : ''
+            }
             <div class="mt-2 grid grid-cols-2 gap-2 text-[13px]">
               <button class="btn btn-primary btn-xxs" data-action="refresh" data-id="${cid}">刷新 IP</button>
               <button class="btn btn-primary btn-xxs" data-action="restart" data-id="${cid}">重启隧道</button>
@@ -152,7 +192,15 @@
     };
     const url = urlMap[action];
     if (!url) return;
-    await fetchJSON(url, { method: 'POST' });
+    const data = await fetchJSON(url, { method: 'POST' });
+    if (data?.message) showToast(data.message);
+    else showToast('操作已提交');
+    await loadContainers();
+  }
+
+  async function runContainerTask(id, taskId) {
+    const data = await fetchJSON(`/containers/${id}/tasks/${taskId}/run`, { method: 'POST' });
+    showToast(data.message || `任务 ${taskId} 已执行`);
     await loadContainers();
   }
 
@@ -190,10 +238,18 @@
         if (!btn) return;
         const id = btn.getAttribute('data-id');
         const action = btn.getAttribute('data-action');
+        const taskId = btn.getAttribute('data-task-id');
+        if (id && action === 'run-task' && taskId) {
+          runContainerTask(id, taskId).catch((err) => {
+            console.error(err);
+            showToast(`任务执行失败: ${err}`, 'error');
+          });
+          return;
+        }
         if (id && action) {
           containerAction(id, action).catch((err) => {
             console.error(err);
-            alert(`Action failed: ${err}`);
+            showToast(`操作失败: ${err}`, 'error');
           });
         }
       });
@@ -334,11 +390,84 @@
     listEl.appendChild(row);
   }
 
+  function slugifyTaskId(value, fallback) {
+    const normalized = String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    return normalized || fallback;
+  }
+
+  function renderTaskEditor(task = {}, idx = 0) {
+    const card = document.createElement('div');
+    const runner = task.runner || {};
+    card.className = 'rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 space-y-3';
+    card.dataset.kind = 'task';
+    card.dataset.taskIndex = String(idx);
+    card.innerHTML = `
+      <div class="flex items-center justify-between gap-2">
+        <div class="text-sm font-semibold text-slate-900">任务 #${idx + 1}</div>
+        <button type="button" class="btn btn-danger btn-xxs" data-action="remove-task">删除任务</button>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        <label class="flex flex-col gap-1 text-xs text-slate-600">任务标题
+          <input type="text" class="input" data-field="task_title" value="${task.title || ''}" placeholder="如：启动 ComfyUI">
+        </label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">任务 ID
+          <input type="text" class="input" data-field="task_id" value="${task.id || ''}" placeholder="如：start-comfyui">
+        </label>
+        <label class="flex items-center gap-2 text-xs text-slate-600 mt-6">
+          <input type="checkbox" class="checkbox" data-field="task_enabled" ${task.enabled === false ? '' : 'checked'}>
+          启用任务
+        </label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">触发方式
+          <select class="input" data-field="task_trigger">
+            <option value="manual" ${task.trigger === 'auto_on_start' ? '' : 'selected'}>manual</option>
+            <option value="auto_on_start" ${task.trigger === 'auto_on_start' ? 'selected' : ''}>auto_on_start</option>
+          </select>
+        </label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">运行模式
+          <select class="input" data-field="task_mode">
+            <option value="once" ${task.mode === 'ensure_running' ? '' : 'selected'}>once</option>
+            <option value="ensure_running" ${task.mode === 'ensure_running' ? 'selected' : ''}>ensure_running</option>
+          </select>
+        </label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">运行器
+          <select class="input" data-field="task_runner_type">
+            <option value="nohup" ${runner.type === 'tmux' || runner.type === 'shell' ? '' : 'selected'}>nohup</option>
+            <option value="tmux" ${runner.type === 'tmux' ? 'selected' : ''}>tmux</option>
+            <option value="shell" ${runner.type === 'shell' ? 'selected' : ''}>shell</option>
+          </select>
+        </label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">tmux Session
+          <input type="text" class="input" data-field="task_session" value="${runner.session || ''}" placeholder="如：comfyui">
+        </label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600 md:col-span-2 xl:col-span-1">工作目录
+          <input type="text" class="input" data-field="task_workdir" value="${task.workdir || ''}" placeholder="/workspace/project">
+        </label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600 md:col-span-2">日志文件
+          <input type="text" class="input" data-field="task_log_file" value="${task.log_file || ''}" placeholder="/workspace/logs/task.log">
+        </label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600 md:col-span-2 xl:col-span-3">命令
+          <textarea class="input min-h-28" data-field="task_command" placeholder="如：python main.py --listen 0.0.0.0 --port 8188">${task.command || ''}</textarea>
+        </label>
+      </div>
+      <div class="text-[11px] text-slate-500">auto_on_start 会在容器进入 Running 后自动尝试执行；ensure_running + tmux 适合常驻服务。</div>
+    `;
+    return card;
+  }
+
+  function appendTaskEditor(listEl, task = {}) {
+    const idx = listEl.querySelectorAll('[data-kind="task"]').length;
+    listEl.appendChild(renderTaskEditor(task, idx));
+  }
+
   function renderContainerCard(container = {}, idx = 0) {
     const listEl = document.getElementById('container-form-list');
     if (!listEl) return;
     const card = document.createElement('div');
-    card.className = 'rounded-2xl border border-white/60 bg-white/80 shadow-sm shadow-slate-900/10 p-4 sm:p-5 space-y-3';
+    card.className = 'rounded-2xl border border-white/60 bg-white/80 shadow-sm shadow-slate-900/10 p-4 sm:p-5 space-y-4';
     card.dataset.index = idx.toString();
     const acs = container.acs || {};
     const ssh = container.ssh || {};
@@ -351,33 +480,33 @@
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <label class="flex flex-col gap-1 text-xs text-slate-600">名称(name)
-          <input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="name" value="${container.name || ''}">
+          <input type="text" class="input" data-field="name" value="${container.name || ''}">
         </label>
         <label class="flex flex-col gap-1 text-xs text-slate-600">ACS 任务名/实例名
-          <input type="text" list="acs-task-options" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="container_name" value="${(container.acs && container.acs.container_name) || ''}">
+          <input type="text" list="acs-task-options" class="input" data-field="container_name" value="${acs.container_name || ''}">
           <span class="text-[11px] text-slate-400">notebook 模式可填基础名，如 Notebook_2603274032；后端会自动匹配到实际副本名。</span>
         </label>
         <label class="flex flex-col gap-1 text-xs text-slate-600">重启策略
-          <select class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="restart_strategy">
+          <select class="input" data-field="restart_strategy">
             <option value="restart" ${restart.strategy === 'recreate' ? '' : 'selected'}>restart</option>
             <option value="recreate" ${restart.strategy === 'recreate' ? 'selected' : ''}>recreate</option>
           </select>
         </label>
         <label class="flex flex-col gap-1 text-xs text-slate-600">SSH 模式
-          <select class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="ssh_mode">
+          <select class="input" data-field="ssh_mode">
             <option value="jump" ${ssh.mode === 'direct' || ssh.mode === 'double' ? '' : 'selected'}>jump</option>
             <option value="direct" ${ssh.mode === 'direct' ? 'selected' : ''}>direct</option>
             <option value="double" ${ssh.mode === 'double' ? 'selected' : ''}>double</option>
           </select>
         </label>
-        <label class="flex flex-col gap-1 text-xs text-slate-600">跳板/远端 Host<input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="bastion_host" value="${ssh.bastion_host || ''}"></label>
-        <label class="flex flex-col gap-1 text-xs text-slate-600">跳板用户<input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="bastion_user" value="${ssh.bastion_user || ''}"></label>
-        <label class="flex flex-col gap-1 text-xs text-slate-600">目标用户<input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="target_user" value="${ssh.target_user || ''}"></label>
-        <label class="flex flex-col gap-1 text-xs text-slate-600">SSH 端口<input type="number" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="port" value="${ssh.port ?? ''}"></label>
-        <label class="flex flex-col gap-1 text-xs text-slate-600">容器 SSH 端口<input type="number" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="container_port" value="${ssh.container_port ?? ''}"></label>
-        <label class="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-200" data-field="password_login" ${ssh.password_login ? 'checked' : ''}>密码登录</label>
-        <label class="flex flex-col gap-1 text-xs text-slate-600">密码<input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="password" value="${ssh.password || ''}"></label>
-        <label class="flex flex-col gap-1 text-xs text-slate-600">容器 IP(兜底)<input type="text" class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-inner shadow-white/40 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="container_ip" value="${ssh.container_ip || ''}"><span class="text-[11px] text-slate-400">自动解析失败时才需要手填；notebook 模式会优先走 /api/tasks/instances/worker/0。</span></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">跳板/远端 Host<input type="text" class="input" data-field="bastion_host" value="${ssh.bastion_host || ''}"></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">跳板用户<input type="text" class="input" data-field="bastion_user" value="${ssh.bastion_user || ''}"></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">目标用户<input type="text" class="input" data-field="target_user" value="${ssh.target_user || ''}"></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">SSH 端口<input type="number" class="input" data-field="port" value="${ssh.port ?? ''}"></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">容器 SSH 端口<input type="number" class="input" data-field="container_port" value="${ssh.container_port ?? ''}"></label>
+        <label class="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" class="checkbox" data-field="password_login" ${ssh.password_login ? 'checked' : ''}>密码登录</label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">密码<input type="text" class="input" data-field="password" value="${ssh.password || ''}"></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">容器 IP(兜底)<input type="text" class="input" data-field="container_ip" value="${ssh.container_ip || ''}"><span class="text-[11px] text-slate-400">自动解析失败时才需要手填；notebook 模式会优先走 /api/tasks/instances/worker/0。</span></label>
       </div>
       <div class="space-y-2">
         <div class="flex items-center justify-between text-xs text-slate-600">
@@ -393,6 +522,16 @@
         </div>
         <div class="space-y-2" data-list="reverse_forwards"></div>
       </div>
+      <div class="space-y-2">
+        <div class="flex items-center justify-between text-xs text-slate-600">
+          <div>
+            <div class="font-semibold">容器任务</div>
+            <div class="text-[11px] text-slate-400">在容器启动后自动执行，或在仪表盘手动触发。</div>
+          </div>
+          <button type="button" class="px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white/80 text-slate-800 hover:border-indigo-200 hover:text-indigo-700 transition duration-150" data-action="add-task">新增任务</button>
+        </div>
+        <div class="space-y-3" data-list="tasks"></div>
+      </div>
     `;
     listEl.appendChild(card);
 
@@ -403,7 +542,7 @@
       serviceField.className = 'flex flex-col gap-1 text-xs text-slate-600';
       serviceField.innerHTML = `
         服务类型
-        <select class="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-800 transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 hover:border-slate-300" data-field="service_type">
+        <select class="input" data-field="service_type">
           <option value="container" ${serviceType === 'notebook' ? '' : 'selected'}>container</option>
           <option value="notebook" ${serviceType === 'notebook' ? 'selected' : ''}>notebook</option>
         </select>
@@ -414,10 +553,49 @@
 
     const fList = card.querySelector('[data-list="forwards"]');
     const rList = card.querySelector('[data-list="reverse_forwards"]');
+    const tList = card.querySelector('[data-list="tasks"]');
     const forwardData = Array.isArray(ssh.forwards) && ssh.forwards.length ? ssh.forwards : [{ local: '', remote: '' }];
     forwardData.forEach((f) => appendForwardRow(fList, 'forward', f));
     const reverseData = Array.isArray(ssh.reverse_forwards) && ssh.reverse_forwards.length ? ssh.reverse_forwards : [{ local: '', remote: '', mid: '' }];
     reverseData.forEach((f) => appendForwardRow(rList, 'reverse', f));
+    const taskData = Array.isArray(container.tasks) ? container.tasks : [];
+    taskData.forEach((task) => appendTaskEditor(tList, task));
+  }
+
+  function collectContainerTasks(card) {
+    const taskCards = Array.from(card.querySelectorAll('[data-kind="task"]'));
+    const usedIds = new Set();
+    return taskCards.map((taskCard, idx) => {
+      const read = (field) => {
+        const el = taskCard.querySelector(`[data-field="${field}"]`);
+        if (!el) return '';
+        if (el.type === 'checkbox') return el.checked;
+        return el.value;
+      };
+      const title = String(read('task_title') || '').trim();
+      const rawId = String(read('task_id') || '').trim();
+      const baseId = slugifyTaskId(rawId || title, `task-${idx + 1}`);
+      let taskId = baseId;
+      let suffix = 2;
+      while (usedIds.has(taskId)) {
+        taskId = `${baseId}-${suffix++}`;
+      }
+      usedIds.add(taskId);
+      return {
+        id: taskId,
+        title: title || taskId,
+        enabled: Boolean(read('task_enabled')),
+        trigger: read('task_trigger') || 'manual',
+        mode: read('task_mode') || 'once',
+        workdir: String(read('task_workdir') || '').trim(),
+        command: String(read('task_command') || '').trim(),
+        log_file: String(read('task_log_file') || '').trim(),
+        runner: {
+          type: read('task_runner_type') || 'nohup',
+          session: String(read('task_session') || '').trim() || taskId,
+        },
+      };
+    }).filter((task) => task.command);
   }
 
   function collectContainers() {
@@ -483,6 +661,7 @@
           reverse_forwards: reverseForwards,
           container_ip: get('input[data-field="container_ip"]').trim(),
         },
+        tasks: collectContainerTasks(card),
       };
     });
   }
@@ -507,9 +686,17 @@
         const list = card.querySelector('[data-list="reverse_forwards"]');
         if (list) appendForwardRow(list, 'reverse', { local: '', remote: '', mid: '' });
       }
+      if (action === 'add-task') {
+        const list = card.querySelector('[data-list="tasks"]');
+        if (list) appendTaskEditor(list, {});
+      }
       if (action === 'remove-row') {
         const row = btn.closest('[data-kind]');
         if (row) row.remove();
+      }
+      if (action === 'remove-task') {
+        const taskCard = btn.closest('[data-kind="task"]');
+        if (taskCard) taskCard.remove();
       }
     });
   }
@@ -538,7 +725,9 @@
 
     setValue('log-level', data.logging?.level);
 
-    const containers = Array.isArray(data.containers) && data.containers.length ? data.containers : [{ name: DEFAULT_CONTAINER_NAME, acs: { container_name: DEFAULT_CONTAINER_NAME }, restart: { strategy: 'restart' }, ssh: {} }];
+    const containers = Array.isArray(data.containers) && data.containers.length
+      ? data.containers
+      : [{ name: DEFAULT_CONTAINER_NAME, acs: { container_name: DEFAULT_CONTAINER_NAME }, restart: { strategy: 'restart' }, ssh: {}, tasks: [] }];
     const listEl = document.getElementById('container-form-list');
     if (listEl) listEl.innerHTML = '';
     containers.forEach((c, idx) => renderContainerCard(c, idx));
@@ -659,7 +848,7 @@
     if (btnAdd) btnAdd.addEventListener('click', () => {
       const listEl = document.getElementById('container-form-list');
       const idx = listEl ? listEl.children.length : 0;
-      renderContainerCard({ name: '', acs: { container_name: '' }, restart: { strategy: 'restart' }, ssh: {} }, idx);
+      renderContainerCard({ name: '', acs: { container_name: '' }, restart: { strategy: 'restart' }, ssh: {}, tasks: [] }, idx);
     });
   }
 

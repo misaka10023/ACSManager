@@ -16,6 +16,7 @@
 - **多容器支持**
   - `containers` 列表为每个容器提供独立的 ACS/SSH 配置（端口、登录方式、转发规则、fallback IP 等）。
   - 后台为每个容器维护独立的生命周期监控与 SSH 隧道；仪表盘可列出全部容器并执行刷新 IP / 启停/重启隧道。
+  - 每个容器还可配置 `tasks` 任务列表，用于在容器进入 `Running` 后自动执行命令，或在仪表盘手动触发任务。
 - **ACS API 客户端 (`acs_manager.container.client.ContainerClient`)**
   - 使用配置中的 Base64 公钥对密码做 RSA 加密，调用 `/login/loginAuth.action` 登录 ACS。
   - 支持配置中直接复用 `JSESSIONID` / `GV_JSESSIONID`（`acs.cookies` 不为空时跳过登录）。
@@ -26,6 +27,7 @@
 - **容器生命周期 + SSH 隧道管理 (`acs_manager.management.controller.ContainerManager`)**
   - 根据 `acs.container_name` 查找 ACS 任务，使用 restart API 在容器停止时自动重启。
   - 解析 `startTime` + `timeoutLimit`，接近自动停止时间前加快轮询频率。
+  - 容器进入 `Running` 后会检查 `tasks` 中配置为 `auto_on_start` 的任务，并通过 SSH 在容器侧执行；支持 `tmux` / `nohup` / `shell` 三种运行器。
   - 维护 SSH 隧道，支持三种模式：
     - `direct`：直连容器 `ssh target_user@container_ip`；
     - `jump`：通过 `-J` 跳板 `ssh -J bastion_user@bastion_host target_user@container_ip`；
@@ -164,12 +166,13 @@ python main.py --config config/local/settings.yaml --log-level INFO
 - **最近日志**
   - 调用 `GET /logs?lines=200`，显示最新日志的 200 行尾部内容。
 
-Dashboard 页面会定期通过 JS 自动刷新健康状态 / 状态 / IP；点击“刷新”按钮可更新日志。
+Dashboard 页面会定期通过 JS 自动刷新健康状态 / 状态 / IP；点击“刷新”按钮可更新日志。若容器配置了 `tasks`，卡片内会显示每个任务的最近状态，并可直接点击“执行任务”。
 
 ### 配置编辑 `/ui/config`
 
-- 可视化表单：全局 ACS（登录、公钥、cookies）、WebUI（host/port/root_path/auth）、日志级别、容器列表（name、ACS 容器名、重启策略、SSH 模式/端口/跳板、转发、兜底 IP 等）。
+- 可视化表单：全局 ACS（登录、公钥、cookies）、WebUI（host/port/root_path/auth）、日志级别、容器列表（name、ACS 容器名、重启策略、SSH 模式/端口/跳板、转发、兜底 IP、任务列表等）。
 - 容器列表可新增/删除；转发每行填写 `本地:远端` 或 `本地:远端:中间端口`（double 需中间端口）；使用 password_hash 时清空明文密码。
+- 任务列表支持为每个容器配置 `manual` / `auto_on_start` 触发方式、`once` / `ensure_running` 模式，以及 `tmux` / `nohup` / `shell` 运行器。
 - 按钮：
   - “重新载入”：`GET /config?reload=true`，重新读盘填充表单。
   - “保存配置”：收集表单并调用 `PUT /config` 覆盖配置文件，结果会提示。
@@ -264,6 +267,10 @@ curl -X PATCH http://localhost:8000/config \
 }
 ```
 
+### `POST /containers/{container_id}/tasks/{task_id}/run`
+
+手动执行某个容器任务，返回启动结果或失败原因。常用于手动拉起 ComfyUI、启动训练脚本等。
+
 ---
 
 ## 配置字段要点（`config/examples/settings.example.yaml`）
@@ -277,6 +284,7 @@ curl -X PATCH http://localhost:8000/config \
 - 若老配置仍是单一 `acs`/`ssh` 段，会自动视为一个容器。
 - `acs.service_type`：`container`（默认）或 `notebook`。`notebook` 会优先走 `/sothisai/api/tasks -> /instances/worker/0` 自动解析 IP；`ssh.container_ip` 仅作为解析失败时的兜底。
 - 重启策略：`restart.strategy` 可选 `restart`（默认，重启原任务）或 `recreate`（新建任务，命名为 `名称_次数_时间戳`）；新建计数/时间戳存于本地 state 文件，用户无需手动修改。
+- 任务配置：`tasks` 为容器任务列表。推荐为常驻服务使用 `trigger=auto_on_start + mode=ensure_running + runner.type=tmux`，为一次性训练使用 `trigger=manual + runner.type=nohup`。
 
 ### `acs` 段
 
@@ -315,6 +323,7 @@ curl -X PATCH http://localhost:8000/config \
 3. `PacketSniffer`（如果已接入）发现新 IP 时调用 `handle_new_ip()`，更新 IP 并在必要时重启隧道。
 4. `maintain_tunnel()` 持续确保 SSH 隧道在线，异常退出会自动重启。
 5. Web UI 和 JSON API 提供运行时状态、日志和配置编辑能力；保存配置会触发自动登录和隧道重启，使关键变更立即生效。
+6. 若容器配置了 `auto_on_start` 任务，监控逻辑会在容器新一轮启动并进入 `Running` 后自动触发一次，并将最近执行状态写入本地 runtime state。
 
 ---
 

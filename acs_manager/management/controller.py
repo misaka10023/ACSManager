@@ -6,6 +6,8 @@ import datetime as dt
 import getpass
 import logging
 import os
+import re
+import shlex
 import subprocess
 from asyncio.subprocess import Process
 from typing import Any, Dict, List, Optional
@@ -60,6 +62,7 @@ class ContainerManager:
         self._stop_requested = False
         self._tunnel_started_once = False
         self._tunnel_failure_count = 0
+        self._task_exec_lock = asyncio.Lock()
 
     @staticmethod
     def _normalize_container_name(name: Optional[str]) -> str:
@@ -76,6 +79,105 @@ class ContainerManager:
         if self.is_placeholder_container_name(name):
             return None
         return str(name).strip()
+
+    @staticmethod
+    def _slugify_task_id(value: Optional[str], fallback: str) -> str:
+        normalized = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(value or "").strip().lower()).strip("-_")
+        return normalized or fallback
+
+    def _task_cfgs(self, *, reload: bool = False) -> List[Dict[str, Any]]:
+        try:
+            root = self.store.read(reload=reload)
+        except Exception:
+            return []
+        tasks = root.get("tasks", []) if isinstance(root, dict) else []
+        if not isinstance(tasks, list):
+            return []
+
+        normalized: List[Dict[str, Any]] = []
+        for idx, raw in enumerate(tasks):
+            if not isinstance(raw, dict):
+                continue
+            fallback_id = f"task-{idx + 1}"
+            title = str(raw.get("title") or raw.get("name") or raw.get("id") or fallback_id).strip()
+            task_id = self._slugify_task_id(raw.get("id") or title, fallback_id)
+            trigger = str(raw.get("trigger") or "manual").strip().lower()
+            if trigger not in {"manual", "auto_on_start"}:
+                trigger = "manual"
+            mode = str(raw.get("mode") or "once").strip().lower()
+            if mode not in {"once", "ensure_running"}:
+                mode = "once"
+            runner_raw = raw.get("runner", {}) if isinstance(raw.get("runner"), dict) else {}
+            runner_type = str(runner_raw.get("type") or ("tmux" if mode == "ensure_running" else "nohup")).strip().lower()
+            if runner_type not in {"tmux", "nohup", "shell"}:
+                runner_type = "nohup"
+            session_name = str(runner_raw.get("session") or task_id).strip() or task_id
+            normalized.append(
+                {
+                    "id": task_id,
+                    "title": title or task_id,
+                    "enabled": bool(raw.get("enabled", True)),
+                    "trigger": trigger,
+                    "mode": mode,
+                    "workdir": str(raw.get("workdir") or "").strip(),
+                    "command": str(raw.get("command") or "").strip(),
+                    "log_file": str(raw.get("log_file") or "").strip(),
+                    "runner": {
+                        "type": runner_type,
+                        "session": session_name,
+                    },
+                }
+            )
+        return normalized
+
+    def _task_config(self, task_id: str, *, reload: bool = False) -> Optional[Dict[str, Any]]:
+        target = str(task_id or "").strip()
+        for task in self._task_cfgs(reload=reload):
+            if task.get("id") == target:
+                return task
+        return None
+
+    def _task_state(self, task_id: str) -> Dict[str, Any]:
+        if not self.state_store:
+            return {}
+        try:
+            return self.state_store.read_task(self.container_id, task_id)
+        except Exception:
+            return {}
+
+    def _persist_task_state(self, task_id: str, changes: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.state_store:
+            return {}
+        try:
+            return self.state_store.update_task(self.container_id, task_id, changes)
+        except Exception as exc:
+            logger.warning("Failed to persist task state for %s/%s: %s", self.container_id, task_id, exc)
+            return {}
+
+    def list_task_summaries(self, *, reload: bool = False) -> List[Dict[str, Any]]:
+        summaries: List[Dict[str, Any]] = []
+        for task in self._task_cfgs(reload=reload):
+            state = self._task_state(task["id"])
+            summaries.append(
+                {
+                    "id": task["id"],
+                    "title": task["title"],
+                    "enabled": task["enabled"],
+                    "trigger": task["trigger"],
+                    "mode": task["mode"],
+                    "workdir": task["workdir"],
+                    "log_file": task["log_file"],
+                    "runner_type": task["runner"]["type"],
+                    "runner_session": task["runner"]["session"],
+                    "last_status": state.get("last_status") or "idle",
+                    "last_message": state.get("last_message") or "",
+                    "last_run_at": state.get("last_run_at"),
+                    "last_reason": state.get("last_reason"),
+                    "last_returncode": state.get("last_returncode"),
+                    "last_pid": state.get("last_pid"),
+                }
+            )
+        return summaries
 
     async def handle_new_ip(self, ip: str, *, source: Optional[str] = None) -> None:
         """捕获到新的容器 IP 时更新状态，若隧道已启动则重启隧道。"""
@@ -293,6 +395,283 @@ class ContainerManager:
         else:
             logger.error("Restart request failed: %s", resp)
 
+    @staticmethod
+    def _trim_task_output(value: str, limit: int = 1200) -> str:
+        text = str(value or "").strip()
+        if len(text) <= limit:
+            return text
+        return text[: limit - 3] + "..."
+
+    def _task_shell_body(self, task: Dict[str, Any]) -> str:
+        command = str(task.get("command") or "").strip()
+        if not command:
+            raise ValueError("Task command is empty.")
+        workdir = str(task.get("workdir") or "").strip()
+        if workdir:
+            return f"cd {shlex.quote(workdir)} && {command}"
+        return command
+
+    def _build_ssh_exec_command(self, remote_command: str, *, reload_config: bool = True) -> List[str]:
+        ssh_cfg = self._ssh_cfg(reload=reload_config)
+        target_ip = self.state.get("container_ip") or ssh_cfg.get("container_ip")
+        if not target_ip:
+            target_ip = self.resolve_container_ip()
+        if not target_ip:
+            raise ValueError("Container IP unknown; cannot execute task.")
+
+        mode = (ssh_cfg.get("mode") or "jump").lower()
+        target_user = ssh_cfg.get("target_user", "root")
+        bastion_host = ssh_cfg.get("bastion_host")
+        bastion_user = ssh_cfg.get("bastion_user") or target_user
+        ssh_port = ssh_cfg.get("port")
+        container_port = ssh_cfg.get("container_port") or ssh_port
+
+        known_hosts = "NUL" if os.name == "nt" else "/dev/null"
+        keepalive = [
+            "-o",
+            "ServerAliveInterval=60",
+            "-o",
+            "ServerAliveCountMax=3",
+            "-o",
+            "ExitOnForwardFailure=yes",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            f"UserKnownHostsFile={known_hosts}",
+            "-o",
+            f"GlobalKnownHostsFile={known_hosts}",
+        ]
+
+        def add_port(base: List[str], port_value: Any) -> None:
+            if port_value:
+                base.extend(["-p", str(port_value)])
+
+        if mode == "double":
+            if not bastion_host:
+                raise ValueError("double mode requires ssh.bastion_host")
+            outer: List[str] = ["ssh", "-T"] + keepalive
+            add_port(outer, ssh_port)
+            outer.append(f"{bastion_user}@{bastion_host}")
+
+            inner: List[str] = ["ssh", "-T"] + keepalive
+            add_port(inner, container_port)
+            inner.append(f"{target_user}@{target_ip}")
+            inner.append(remote_command)
+            outer.append(" ".join(shlex.quote(part) for part in inner))
+            return outer
+
+        cmd: List[str] = ["ssh", "-T"] + keepalive
+        add_port(cmd, ssh_port)
+        if mode == "jump":
+            if not bastion_host:
+                raise ValueError("jump mode requires ssh.bastion_host")
+            cmd.extend(["-J", f"{bastion_user}@{bastion_host}"])
+        cmd.append(f"{target_user}@{target_ip}")
+        cmd.append(remote_command)
+        return cmd
+
+    def _run_remote_shell(
+        self,
+        remote_command: str,
+        *,
+        timeout: int = 60,
+        reload_config: bool = True,
+        allowed_returncodes: Optional[set[int]] = None,
+    ) -> Dict[str, Any]:
+        cmd = self._build_ssh_exec_command(remote_command, reload_config=reload_config)
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        stdout = self._trim_task_output(proc.stdout or "")
+        stderr = self._trim_task_output(proc.stderr or "")
+        ok_codes = allowed_returncodes or {0}
+        return {
+            "ok": proc.returncode in ok_codes,
+            "returncode": proc.returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+            "command": cmd,
+        }
+
+    def _task_session_exists(self, session_name: str) -> bool:
+        probe = self._run_remote_shell(
+            f"tmux has-session -t {shlex.quote(session_name)}",
+            timeout=20,
+            reload_config=False,
+            allowed_returncodes={0, 1},
+        )
+        return probe.get("returncode") == 0
+
+    def _execute_task_sync(self, task: Dict[str, Any], *, force: bool = False, reason: str = "manual") -> Dict[str, Any]:
+        task_id = task["id"]
+        runner = task["runner"]["type"]
+        session_name = task["runner"]["session"]
+        now = dt.datetime.now().isoformat()
+        self._persist_task_state(
+            task_id,
+            {
+                "last_status": "running",
+                "last_reason": reason,
+                "last_run_at": now,
+                "last_message": "Task is starting.",
+            },
+        )
+
+        shell_body = self._task_shell_body(task)
+        log_file = str(task.get("log_file") or "").strip()
+
+        if runner == "tmux":
+            if force:
+                self._run_remote_shell(
+                    f"tmux kill-session -t {shlex.quote(session_name)} >/dev/null 2>&1 || true",
+                    timeout=20,
+                    reload_config=False,
+                    allowed_returncodes={0},
+                )
+            elif self._task_session_exists(session_name):
+                result = {
+                    "success": True,
+                    "status": "already_running",
+                    "message": f"Task {task['title']} is already running.",
+                }
+                self._persist_task_state(
+                    task_id,
+                    {
+                        "last_status": "already_running",
+                        "last_reason": reason,
+                        "last_run_at": now,
+                        "last_message": result["message"],
+                    },
+                )
+                return result
+
+            launch = shell_body
+            if log_file:
+                launch = f"{launch} >> {shlex.quote(log_file)} 2>&1"
+            remote_command = f"tmux new-session -d -s {shlex.quote(session_name)} {shlex.quote(launch)}"
+            outcome = self._run_remote_shell(remote_command, timeout=30, reload_config=False)
+            success = bool(outcome.get("ok"))
+            message = f"Task {task['title']} started in tmux session {session_name}." if success else (
+                outcome.get("stderr") or outcome.get("stdout") or f"Failed to start task {task['title']}."
+            )
+            self._persist_task_state(
+                task_id,
+                {
+                    "last_status": "started" if success else "failed",
+                    "last_reason": reason,
+                    "last_run_at": now,
+                    "last_message": self._trim_task_output(message),
+                    "last_returncode": outcome.get("returncode"),
+                },
+            )
+            return {
+                "success": success,
+                "status": "started" if success else "failed",
+                "message": self._trim_task_output(message),
+                "returncode": outcome.get("returncode"),
+            }
+
+        if runner == "nohup":
+            launch = f"nohup bash -lc {shlex.quote(shell_body)}"
+            if log_file:
+                launch = f"{launch} >> {shlex.quote(log_file)} 2>&1"
+            launch = f"{launch} & echo $!"
+            outcome = self._run_remote_shell(launch, timeout=30, reload_config=False)
+            success = bool(outcome.get("ok"))
+            pid = None
+            if success:
+                for line in reversed((outcome.get("stdout") or "").splitlines()):
+                    if line.strip().isdigit():
+                        pid = int(line.strip())
+                        break
+            message = f"Task {task['title']} started in background." if success else (
+                outcome.get("stderr") or outcome.get("stdout") or f"Failed to start task {task['title']}."
+            )
+            self._persist_task_state(
+                task_id,
+                {
+                    "last_status": "started" if success else "failed",
+                    "last_reason": reason,
+                    "last_run_at": now,
+                    "last_message": self._trim_task_output(message),
+                    "last_returncode": outcome.get("returncode"),
+                    "last_pid": pid,
+                },
+            )
+            return {
+                "success": success,
+                "status": "started" if success else "failed",
+                "message": self._trim_task_output(message),
+                "returncode": outcome.get("returncode"),
+                "pid": pid,
+            }
+
+        outcome = self._run_remote_shell(f"bash -lc {shlex.quote(shell_body)}", timeout=3600, reload_config=False)
+        success = bool(outcome.get("ok"))
+        message = f"Task {task['title']} completed." if success else (
+            outcome.get("stderr") or outcome.get("stdout") or f"Task {task['title']} failed."
+        )
+        self._persist_task_state(
+            task_id,
+            {
+                "last_status": "completed" if success else "failed",
+                "last_reason": reason,
+                "last_run_at": now,
+                "last_message": self._trim_task_output(message),
+                "last_returncode": outcome.get("returncode"),
+            },
+        )
+        return {
+            "success": success,
+            "status": "completed" if success else "failed",
+            "message": self._trim_task_output(message),
+            "returncode": outcome.get("returncode"),
+            "stdout": outcome.get("stdout"),
+            "stderr": outcome.get("stderr"),
+        }
+
+    async def execute_task(self, task_id: str, *, force: bool = False, reason: str = "manual") -> Dict[str, Any]:
+        task = self._task_config(task_id, reload=True)
+        if not task:
+            raise ValueError(f"Task {task_id} not found")
+        if not task.get("enabled", True):
+            raise ValueError(f"Task {task['title']} is disabled")
+        async with self._task_exec_lock:
+            return await asyncio.to_thread(self._execute_task_sync, task, force=force, reason=reason)
+
+    async def _maybe_run_auto_tasks(self, info: Dict[str, Any]) -> None:
+        marker = str(
+            info.get("startTime")
+            or info.get("createTime")
+            or self.state.get("container_ip")
+            or ""
+        ).strip()
+        if not marker:
+            return
+        for task in self._task_cfgs(reload=True):
+            if not task.get("enabled", True) or task.get("trigger") != "auto_on_start":
+                continue
+            state = self._task_state(task["id"])
+            if state.get("last_auto_marker") == marker:
+                continue
+            try:
+                result = await self.execute_task(task["id"], force=False, reason="auto_on_start")
+            except Exception as exc:
+                logger.error("Auto task %s failed for %s: %s", task["id"], self.container_id, exc)
+                continue
+            if result.get("success"):
+                self._persist_task_state(
+                    task["id"],
+                    {
+                        "last_auto_marker": marker,
+                        "auto_triggered_at": dt.datetime.now().isoformat(),
+                    },
+                )
+
     def _parse_start_time(self, value: Optional[str]) -> Optional[dt.datetime]:
         """解析时间字符串为 datetime。"""
         if not value:
@@ -405,10 +784,13 @@ class ContainerManager:
                         logger.info("Container %s is Waiting (queued); continuing to poll.", name)
                         interval = min(interval, fast_interval)
 
+                    if status_norm == "running":
+                        await self._maybe_run_auto_tasks(info)
+
                     if status_norm in stop_statuses:
                         logger.warning("Container %s status is %s; triggering restart.", name, status)
                         await self.restart_container()
-                        break
+                        interval = fast_interval
                 else:
                     logger.warning("Container %s not found; will retry soon.", name)
                     interval = fast_interval
@@ -476,7 +858,7 @@ class ContainerManager:
 
             outer: List[str] = ["ssh", "-T"] + keepalive
             add_port(outer, ssh_port)
-            add_forwards(outer, default_remote=False)
+            add_forwards(outer)
             for spec in revs:
                 outer.extend(["-R", f"{spec['mid']}:localhost:{spec['local']}"])
             outer.append(f"{bastion_user}@{bastion_host}")
@@ -845,6 +1227,7 @@ done
     def snapshot(self) -> Dict[str, Any]:
         """获取当前状态（供 Web UI 展示）。"""
         snap = dict(self.state)
+        snap["tasks"] = self.list_task_summaries(reload=False)
         try:
             acs_cfg = self._acs_cfg(reload=False)
             snap["configured_container_name"] = acs_cfg.get("container_name")
@@ -908,6 +1291,7 @@ done
                 if ip_local:
                     await self.handle_new_ip(ip_local)
                 if status_local == "running":
+                    await self._maybe_run_auto_tasks(latest)
                     logger.info("Container %s is now running; continue startup.", name)
                     return
                 if status_local == "waiting":
@@ -925,6 +1309,8 @@ done
             await self.restart_container()
             await _wait_for_running()
         else:
+            if status == "running":
+                await self._maybe_run_auto_tasks(info)
             logger.info("Container %s status is %s; continuing startup.", name, status or "unknown")
 
     def _acs_cfg(self, *, reload: bool = False) -> Dict[str, Any]:
