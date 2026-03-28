@@ -108,8 +108,10 @@ class ContainerManager:
             if mode not in {"once", "ensure_running"}:
                 mode = "once"
             runner_raw = raw.get("runner", {}) if isinstance(raw.get("runner"), dict) else {}
-            runner_type = str(runner_raw.get("type") or ("tmux" if mode == "ensure_running" else "nohup")).strip().lower()
-            if runner_type not in {"tmux", "nohup", "shell"}:
+            runner_type = str(runner_raw.get("type") or ("screen" if mode == "ensure_running" else "nohup")).strip().lower()
+            if runner_type == "tmux":
+                runner_type = "screen"
+            if runner_type not in {"screen", "nohup", "shell"}:
                 runner_type = "nohup"
             session_name = str(runner_raw.get("session") or task_id).strip() or task_id
             normalized.append(
@@ -499,7 +501,7 @@ class ContainerManager:
 
     def _task_session_exists(self, session_name: str) -> bool:
         probe = self._run_remote_shell(
-            f"tmux has-session -t {shlex.quote(session_name)}",
+            f"screen -ls | grep -Fq {shlex.quote('.' + session_name)}",
             timeout=20,
             reload_config=False,
             allowed_returncodes={0, 1},
@@ -524,10 +526,10 @@ class ContainerManager:
         shell_body = self._task_shell_body(task)
         log_file = str(task.get("log_file") or "").strip()
 
-        if runner == "tmux":
+        if runner == "screen":
             if force:
                 self._run_remote_shell(
-                    f"tmux kill-session -t {shlex.quote(session_name)} >/dev/null 2>&1 || true",
+                    f"screen -S {shlex.quote(session_name)} -X quit >/dev/null 2>&1 || true",
                     timeout=20,
                     reload_config=False,
                     allowed_returncodes={0},
@@ -552,10 +554,10 @@ class ContainerManager:
             launch = shell_body
             if log_file:
                 launch = f"{launch} >> {shlex.quote(log_file)} 2>&1"
-            remote_command = f"tmux new-session -d -s {shlex.quote(session_name)} {shlex.quote(launch)}"
+            remote_command = f"screen -dmS {shlex.quote(session_name)} bash -lc {shlex.quote(launch)}"
             outcome = self._run_remote_shell(remote_command, timeout=30, reload_config=False)
             success = bool(outcome.get("ok"))
-            message = f"Task {task['title']} started in tmux session {session_name}." if success else (
+            message = f"Task {task['title']} started in screen session {session_name}." if success else (
                 outcome.get("stderr") or outcome.get("stdout") or f"Failed to start task {task['title']}."
             )
             self._persist_task_state(

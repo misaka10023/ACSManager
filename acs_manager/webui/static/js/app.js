@@ -402,6 +402,7 @@
   function renderTaskEditor(task = {}, idx = 0) {
     const card = document.createElement('div');
     const runner = task.runner || {};
+    const runnerType = runner.type === 'tmux' ? 'screen' : (runner.type || 'nohup');
     card.className = 'rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 space-y-3';
     card.dataset.kind = 'task';
     card.dataset.taskIndex = String(idx);
@@ -435,12 +436,12 @@
         </label>
         <label class="flex flex-col gap-1 text-xs text-slate-600">运行器
           <select class="input" data-field="task_runner_type">
-            <option value="nohup" ${runner.type === 'tmux' || runner.type === 'shell' ? '' : 'selected'}>nohup</option>
-            <option value="tmux" ${runner.type === 'tmux' ? 'selected' : ''}>tmux</option>
-            <option value="shell" ${runner.type === 'shell' ? 'selected' : ''}>shell</option>
+            <option value="nohup" ${runnerType === 'nohup' ? 'selected' : ''}>nohup</option>
+            <option value="screen" ${runnerType === 'screen' ? 'selected' : ''}>screen</option>
+            <option value="shell" ${runnerType === 'shell' ? 'selected' : ''}>shell</option>
           </select>
         </label>
-        <label class="flex flex-col gap-1 text-xs text-slate-600">tmux Session
+        <label class="flex flex-col gap-1 text-xs text-slate-600">screen Session
           <input type="text" class="input" data-field="task_session" value="${runner.session || ''}" placeholder="如：comfyui">
         </label>
         <label class="flex flex-col gap-1 text-xs text-slate-600 md:col-span-2 xl:col-span-1">工作目录
@@ -453,7 +454,7 @@
           <textarea class="input min-h-28" data-field="task_command" placeholder="如：python main.py --listen 0.0.0.0 --port 8188">${task.command || ''}</textarea>
         </label>
       </div>
-      <div class="text-[11px] text-slate-500">auto_on_start 会在容器进入 Running 后自动尝试执行；ensure_running + tmux 适合常驻服务。</div>
+      <div class="text-[11px] text-slate-500">auto_on_start 会在容器进入 Running 后自动尝试执行；ensure_running + screen 适合常驻服务。</div>
     `;
     return card;
   }
