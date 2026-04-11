@@ -260,11 +260,70 @@ class ContainerManager:
         """检测到容器停止时触发重启。"""
         await self.restart_container()
 
+    @staticmethod
+    def _restart_response_not_found(resp: Optional[Dict[str, Any]]) -> bool:
+        if not isinstance(resp, dict):
+            return False
+        code = str(resp.get("code") or "").strip()
+        msg = str(resp.get("msg") or "").strip()
+        return code == "816822" or "任务不存在" in msg
+
+    @staticmethod
+    def _collect_restart_ids(*records: Optional[Dict[str, Any]]) -> List[str]:
+        ids: List[str] = []
+        seen: set[str] = set()
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            for key in ("instanceServiceId", "taskId", "id"):
+                value = str(record.get(key) or "").strip()
+                if value and value not in seen:
+                    ids.append(value)
+                    seen.add(value)
+        return ids
+
+    def _load_recreate_detail(self, task: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        attempts: List[tuple[str, Any, str]] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add_attempt(label: str, fn: Any, value: Any) -> None:
+            task_id = str(value or "").strip()
+            if not task_id:
+                return
+            key = (label, task_id)
+            if key in seen:
+                return
+            seen.add(key)
+            attempts.append((label, fn, task_id))
+
+        add_attempt("instance detail", self.container_client.get_instance_detail, task.get("instanceServiceId"))
+        add_attempt("notebook detail", self.container_client.get_notebook_task_detail, task.get("taskId"))
+        add_attempt("instance detail", self.container_client.get_instance_detail, task.get("id"))
+        add_attempt("notebook detail", self.container_client.get_notebook_task_detail, task.get("id"))
+
+        last_exc: Optional[Exception] = None
+        for label, fn, task_id in attempts:
+            try:
+                detail = fn(task_id)
+            except Exception as exc:
+                last_exc = exc
+                continue
+            data = detail.get("data") if isinstance(detail, dict) else None
+            if data is None and isinstance(detail, dict):
+                data = detail
+            if isinstance(data, dict) and data:
+                return data
+            logger.warning("Unexpected %s format when recreating task %s", label, task_id)
+
+        if last_exc:
+            logger.error("Failed to fetch task detail for recreate: %s", last_exc)
+        return None
+
     def _recreate_container_task(self, base_name: str, task: Dict[str, Any]) -> bool:
         """创建新的任务实例，名称遵循 baseName_counter_timestamp。"""
-        task_id = task.get("instanceServiceId") or task.get("id")
+        task_id = task.get("instanceServiceId") or task.get("taskId") or task.get("id")
         if not task_id:
-            logger.error("Cannot recreate task without instanceServiceId/id.")
+            logger.error("Cannot recreate task without instanceServiceId/taskId/id.")
             return False
 
         restart_cfg = self._restart_cfg(reload=False)
@@ -272,15 +331,7 @@ class ContainerManager:
         timestamp = dt.datetime.now().strftime("%Y%m%d%H%M%S")
         new_name = f"{base_name}_{new_count}_{timestamp}"
 
-        try:
-            detail = self.container_client.get_instance_detail(task_id)
-        except Exception as exc:
-            logger.error("Failed to fetch task detail for recreate: %s", exc)
-            return False
-
-        data = detail.get("data") if isinstance(detail, dict) else None
-        if data is None and isinstance(detail, dict):
-            data = detail
+        data = self._load_recreate_detail(task)
         if not isinstance(data, dict):
             logger.error("Unexpected detail format when recreating task %s", task_id)
             return False
@@ -356,46 +407,77 @@ class ContainerManager:
         logger.error("Create new task failed: %s", resp)
         return False
 
-    async def restart_container(self) -> None:
+    async def restart_container(
+        self,
+        info: Optional[Dict[str, Any]] = None,
+        *,
+        name_hint: Optional[str] = None,
+    ) -> None:
         """调用 ACS 重启接口。"""
-        name = self.configured_container_name(reload=True)
+        name = str(name_hint or self.configured_container_name(reload=True) or "").strip()
         if not name:
             logger.error("acs.container_name not configured or placeholder; cannot restart.")
             return
 
+        service_type = str(self._acs_cfg(reload=True).get("service_type") or "container").strip().lower()
         try:
             task = self.container_client.find_instance_by_name(name)
         except Exception as exc:
             logger.error("Failed to query container %s; cannot restart: %s", name, exc)
-            return
-        if not task:
-            logger.error("Container %s not found; cannot restart.", name)
-            return
-        task_id = task.get("instanceServiceId") or task.get("id")
-        if not task_id:
-            logger.error("Container %s missing instanceServiceId; cannot restart.", name)
-            return
+            task = None
+
+        container_task: Optional[Dict[str, Any]] = None
+        if service_type == "notebook":
+            try:
+                container_task = self.container_client.find_container_task_by_name(name)
+            except Exception as exc:
+                logger.warning("Failed to query container restart target for notebook %s: %s", name, exc)
+
+        restart_target = container_task or task or info
+        recreate_target = container_task or task or info
+        restart_ids = self._collect_restart_ids(container_task, info, task)
 
         restart_cfg = self._restart_cfg(reload=True)
         if restart_cfg.get("strategy") == "recreate":
             base_name = self.display_name or name
             logger.warning("Recreate strategy enabled; creating new task for %s (base name: %s)", name, base_name)
-            created = self._recreate_container_task(base_name, task)
+            created = self._recreate_container_task(base_name, recreate_target or {})
             if created:
                 return
             logger.warning("Recreate task failed; falling back to restart original task.")
 
-        logger.warning("Attempting to restart container %s (task id: %s)", name, task_id)
-        try:
-            resp = self.container_client.restart_task(task_id)
-        except Exception as exc:
-            logger.error("Restart API call failed: %s", exc)
-            return
-        if str(resp.get("code")) == "0":
-            logger.info("Restart request accepted: %s", resp)
-            self.state["last_restart"] = dt.datetime.now()
+        last_resp: Optional[Dict[str, Any]] = None
+        if restart_target and restart_ids:
+            for task_id in restart_ids:
+                logger.warning("Attempting to restart container %s (task id: %s)", name, task_id)
+                try:
+                    resp = self.container_client.restart_task(task_id)
+                except Exception as exc:
+                    logger.error("Restart API call failed: %s", exc)
+                    return
+                if str(resp.get("code")) == "0":
+                    logger.info("Restart request accepted: %s", resp)
+                    self.state["last_restart"] = dt.datetime.now()
+                    return
+                last_resp = resp
+                if not self._restart_response_not_found(resp):
+                    logger.error("Restart request failed: %s", resp)
+                    return
+
+        if service_type == "notebook" and recreate_target:
+            base_name = self.display_name or name
+            logger.warning(
+                "Notebook restart target for %s is not restartable via instance-service; recreating task instead.",
+                name,
+            )
+            created = self._recreate_container_task(base_name, recreate_target)
+            if created:
+                return
+
+        if last_resp is not None:
+            logger.error("Restart request failed: %s", last_resp)
         else:
-            logger.error("Restart request failed: %s", resp)
+            logger.error("Container %s not found or missing usable restart identifiers; cannot restart.", name)
 
     @staticmethod
     def _trim_task_output(value: str, limit: int = 1200) -> str:
@@ -708,13 +790,12 @@ class ContainerManager:
 
     async def monitor_container(self, *, pre_shutdown_minutes: int = 10, slow_interval: int = 300, fast_interval: int = 30) -> None:
         """周期检查容器状态，接近超时时加快轮询，停止则重启。"""
-        name = self.configured_container_name(reload=True)
-        if not name:
-            logger.warning("acs.container_name not configured or placeholder; monitor loop exits.")
-            return
-
         while not self._stop_requested:
             interval = slow_interval
+            name = self.configured_container_name(reload=True)
+            if not name:
+                logger.warning("acs.container_name not configured or placeholder; monitor loop exits.")
+                return
             try:
                 try:
                     info = self.container_client.get_container_instance_info_by_name(name)
@@ -791,7 +872,7 @@ class ContainerManager:
 
                     if status_norm in stop_statuses:
                         logger.warning("Container %s status is %s; triggering restart.", name, status)
-                        await self.restart_container()
+                        await self.restart_container(info=info, name_hint=name)
                         interval = fast_interval
                 else:
                     logger.warning("Container %s not found; will retry soon.", name)
@@ -1213,7 +1294,7 @@ done
                             }
                             if unhealthy:
                                 logger.warning("Container %s status %s appears unhealthy; attempting restart.", name, status)
-                                await self.restart_container()
+                                await self.restart_container(info=info, name_hint=name)
                         self._tunnel_failure_count = 0
             except Exception as exc:  # pragma: no cover - subprocess errors
                 logger.error("SSH tunnel crashed: %s", exc)
@@ -1261,14 +1342,17 @@ done
             logger.error("Login failed during startup preparation: %s", exc)
             return
 
-        def _fetch_info() -> Optional[Dict[str, Any]]:
+        def _fetch_info() -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+            current_name = self.configured_container_name(reload=True)
+            if not current_name:
+                return None, None
             try:
-                return self.container_client.get_container_instance_info_by_name(name)
+                return current_name, self.container_client.get_container_instance_info_by_name(current_name)
             except Exception as exc:
-                logger.error("Failed to fetch container info for %s: %s", name, exc)
-                return None
+                logger.error("Failed to fetch container info for %s: %s", current_name, exc)
+                return current_name, None
 
-        info = _fetch_info()
+        name, info = _fetch_info()
         if not info:
             logger.warning("Container %s not found during startup check.", name)
             return
@@ -1283,7 +1367,7 @@ done
         async def _wait_for_running() -> None:
             deadline = dt.datetime.now() + dt.timedelta(seconds=start_timeout)
             while dt.datetime.now() < deadline and not self._stop_requested:
-                latest = _fetch_info()
+                latest_name, latest = _fetch_info()
                 if not latest:
                     await asyncio.sleep(wait_interval)
                     continue
@@ -1294,21 +1378,21 @@ done
                     await self.handle_new_ip(ip_local)
                 if status_local == "running":
                     await self._maybe_run_auto_tasks(latest)
-                    logger.info("Container %s is now running; continue startup.", name)
+                    logger.info("Container %s is now running; continue startup.", latest_name)
                     return
                 if status_local == "waiting":
-                    logger.info("Container %s still waiting; polling...", name)
+                    logger.info("Container %s still waiting; polling...", latest_name)
                 else:
-                    logger.info("Container %s status=%s; waiting for running...", name, status_local)
+                    logger.info("Container %s status=%s; waiting for running...", latest_name, status_local)
                 await asyncio.sleep(wait_interval)
-            logger.warning("Timeout waiting for container %s to reach running state.", name)
+            logger.warning("Timeout waiting for container %s to reach running state.", self.configured_container_name(reload=True) or name)
 
         if status == "waiting":
             logger.info("Container %s is Waiting; polling until it starts.", name)
             await _wait_for_running()
         elif status in {"terminated", "stopped", "stop", "failed"}:
             logger.warning("Container %s is stopped (%s); attempting to start.", name, status)
-            await self.restart_container()
+            await self.restart_container(info=info, name_hint=name)
             await _wait_for_running()
         else:
             if status == "running":

@@ -26,6 +26,7 @@
 
 - **容器生命周期 + SSH 隧道管理 (`acs_manager.management.controller.ContainerManager`)**
   - 根据 `acs.container_name` 查找 ACS 任务，使用 restart API 在容器停止时自动重启。
+  - `notebook` 模式下会优先尝试把当前 notebook 名映射回可重启的 instance-service 记录；若 ACS 已无法对旧 notebook 任务执行 restart，则回退为按当前配置重建新任务。
   - 解析 `startTime` + `timeoutLimit`，接近自动停止时间前加快轮询频率。
   - 容器进入 `Running` 后会检查 `tasks` 中配置为 `auto_on_start` 的任务，并通过 SSH 在容器侧执行；支持 `screen` / `nohup` / `shell` 三种运行器。
   - 维护 SSH 隧道，支持三种模式：

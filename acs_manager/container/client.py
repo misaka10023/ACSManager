@@ -364,7 +364,11 @@ class ContainerClient:
                 return token
         return None
 
-    def find_instance_by_name(self, name: str, *, start: int = 0, limit: int = 200) -> Optional[Dict[str, Any]]:
+    def _match_instance_from_sources(
+        self,
+        name: str,
+        sources: List[tuple[str, List[Dict[str, Any]], tuple[str, ...]]],
+    ) -> Optional[Dict[str, Any]]:
         """
         按名称匹配任务，返回“最新”的一条匹配记录。
 
@@ -374,20 +378,6 @@ class ContainerClient:
         - 在候选集中按 startTime/createTime 解析后的时间排序，返回最新一条。
         """
         target = name.strip().lower()
-        service_type = self._service_type(reload=False)
-        sources: List[tuple[str, List[Dict[str, Any]], tuple[str, ...]]] = []
-        if service_type == "notebook":
-            try:
-                notebook_items = self._task_items(self.list_notebook_tasks(start=start, limit=limit))
-            except Exception:
-                notebook_items = []
-            sources.append(("notebook", notebook_items, ("taskName", "name")))
-        try:
-            container_items = self._task_items(self.list_tasks(start=start, limit=limit))
-        except Exception:
-            container_items = []
-        sources.append(("container", container_items, ("instanceServiceName", "taskName", "notebookName", "name")))
-
         for source_name, items, name_keys in sources:
             if not items:
                 continue
@@ -410,6 +400,31 @@ class ContainerClient:
             if candidates:
                 return max(candidates, key=self._parse_task_time)
         return None
+
+    def find_instance_by_name(self, name: str, *, start: int = 0, limit: int = 200) -> Optional[Dict[str, Any]]:
+        service_type = self._service_type(reload=False)
+        sources: List[tuple[str, List[Dict[str, Any]], tuple[str, ...]]] = []
+        if service_type == "notebook":
+            try:
+                notebook_items = self._task_items(self.list_notebook_tasks(start=start, limit=limit))
+            except Exception:
+                notebook_items = []
+            sources.append(("notebook", notebook_items, ("taskName", "name")))
+        try:
+            container_items = self._task_items(self.list_tasks(start=start, limit=limit))
+        except Exception:
+            container_items = []
+        sources.append(("container", container_items, ("instanceServiceName", "taskName", "notebookName", "name")))
+        return self._match_instance_from_sources(name, sources)
+
+    def find_container_task_by_name(self, name: str, *, start: int = 0, limit: int = 200) -> Optional[Dict[str, Any]]:
+        """Match only instance-service/container records to recover restartable service IDs."""
+        try:
+            container_items = self._task_items(self.list_tasks(start=start, limit=limit))
+        except Exception:
+            container_items = []
+        sources = [("container", container_items, ("instanceServiceName", "taskName", "notebookName", "name"))]
+        return self._match_instance_from_sources(name, sources)
 
     def list_task_suggestions(self, *, limit: int = 200) -> List[Dict[str, Any]]:
         """Return merged task suggestions for Web UI autocomplete."""
@@ -512,9 +527,21 @@ class ContainerClient:
             info["instanceIp"] = candidate_ip
             info["ipSource"] = "api.tasks.instance"
 
-        info["instanceServiceId"] = task_id
-        if source_task.get("taskId"):
-            info["taskId"] = source_task.get("taskId")
+        instance_service_id = (
+            source_task.get("instanceServiceId")
+            or task.get("instanceServiceId")
+        )
+        if instance_service_id:
+            info["instanceServiceId"] = instance_service_id
+        notebook_task_id = (
+            source_task.get("taskId")
+            or source_task.get("id")
+            or task.get("taskId")
+            or task.get("id")
+            or task_id
+        )
+        if notebook_task_id:
+            info["taskId"] = notebook_task_id
         if source_task.get("taskName"):
             info["taskName"] = source_task.get("taskName")
         return info
@@ -546,7 +573,10 @@ class ContainerClient:
         service_type = self._service_type(reload=False)
 
         if service_type == "notebook":
-            return self._get_notebook_instance_info(task, str(service_id))
+            notebook_task_id = task.get("taskId") or task.get("id") or task.get("instanceServiceId")
+            if not notebook_task_id:
+                return None
+            return self._get_notebook_instance_info(task, str(notebook_task_id))
 
         info: Dict[str, Any] = {}
         try:
