@@ -28,7 +28,7 @@
   - 根据 `acs.container_name` 查找 ACS 任务，使用 restart API 在容器停止时自动重启。
   - `notebook` 模式下会优先尝试把当前 notebook 名映射回可重启的 instance-service 记录；若 ACS 已无法对旧 notebook 任务执行 restart，则回退为按当前配置重建新任务。
   - 解析 `startTime` + `timeoutLimit`，接近自动停止时间前加快轮询频率。
-  - 容器进入 `Running` 后会检查 `tasks` 中配置为 `auto_on_start` 的任务，并通过 SSH 在容器侧执行；支持 `screen` / `nohup` / `shell` 三种运行器。
+  - 容器进入 `Running` 后会检查 `tasks` 中配置为 `auto_on_start` 的任务，并通过 SSH 在容器侧执行；支持 `screen` / `nohup` / `shell` 三种运行器。`screen` 任务在命令退出后会保留一个可手动 attach 的 shell，便于排查现场。
   - 维护 SSH 隧道，支持三种模式：
     - `direct`：直连容器 `ssh target_user@container_ip`；
     - `jump`：通过 `-J` 跳板 `ssh -J bastion_user@bastion_host target_user@container_ip`；
@@ -285,7 +285,7 @@ curl -X PATCH http://localhost:8000/config \
 - 若老配置仍是单一 `acs`/`ssh` 段，会自动视为一个容器。
 - `acs.service_type`：`container`（默认）或 `notebook`。`notebook` 会优先走 `/sothisai/api/tasks -> /instances/worker/0` 自动解析 IP；`ssh.container_ip` 仅作为解析失败时的兜底。
 - 重启策略：`restart.strategy` 可选 `restart`（默认，重启原任务）或 `recreate`（新建任务，命名为 `名称_次数_时间戳`）；新建计数/时间戳存于本地 state 文件，用户无需手动修改。
-- 任务配置：`tasks` 为容器任务列表。推荐为常驻服务使用 `trigger=auto_on_start + mode=ensure_running + runner.type=screen`，为一次性训练使用 `trigger=manual + runner.type=nohup`。
+- 任务配置：`tasks` 为容器任务列表。推荐为常驻服务使用 `trigger=auto_on_start + mode=ensure_running + runner.type=screen`，为一次性训练使用 `trigger=manual + runner.type=nohup`。`screen` 运行时会额外维护一个远端运行标记，避免把仅剩 shell 的会话误判成任务仍在运行。
 
 ### `acs` 段
 

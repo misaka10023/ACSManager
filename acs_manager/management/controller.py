@@ -590,6 +590,31 @@ class ContainerManager:
         )
         return probe.get("returncode") == 0
 
+    def _task_screen_marker_path(self, task_id: str) -> str:
+        container_key = self._slugify_task_id(self.container_id, "container")
+        task_key = self._slugify_task_id(task_id, "task")
+        return f"/tmp/acs-manager-{container_key}-{task_key}.running"
+
+    def _task_screen_is_running(self, session_name: str, marker_path: str) -> bool:
+        probe = self._run_remote_shell(
+            f"screen -ls | grep -Fq {shlex.quote('.' + session_name)} && [ -f {shlex.quote(marker_path)} ]",
+            timeout=20,
+            reload_config=False,
+            allowed_returncodes={0, 1},
+        )
+        return probe.get("returncode") == 0
+
+    def _reset_task_screen_session(self, session_name: str, marker_path: str) -> None:
+        self._run_remote_shell(
+            (
+                f"screen -S {shlex.quote(session_name)} -X quit >/dev/null 2>&1 || true; "
+                f"rm -f {shlex.quote(marker_path)} >/dev/null 2>&1 || true"
+            ),
+            timeout=20,
+            reload_config=False,
+            allowed_returncodes={0},
+        )
+
     def _execute_task_sync(self, task: Dict[str, Any], *, force: bool = False, reason: str = "manual") -> Dict[str, Any]:
         task_id = task["id"]
         runner = task["runner"]["type"]
@@ -609,14 +634,10 @@ class ContainerManager:
         log_file = str(task.get("log_file") or "").strip()
 
         if runner == "screen":
+            marker_path = self._task_screen_marker_path(task_id)
             if force:
-                self._run_remote_shell(
-                    f"screen -S {shlex.quote(session_name)} -X quit >/dev/null 2>&1 || true",
-                    timeout=20,
-                    reload_config=False,
-                    allowed_returncodes={0},
-                )
-            elif self._task_session_exists(session_name):
+                self._reset_task_screen_session(session_name, marker_path)
+            elif self._task_screen_is_running(session_name, marker_path):
                 result = {
                     "success": True,
                     "status": "already_running",
@@ -632,11 +653,25 @@ class ContainerManager:
                     },
                 )
                 return result
+            elif self._task_session_exists(session_name):
+                # Keep an attachable shell after the managed command exits, but
+                # reset any leftover shell before starting a new managed run.
+                self._reset_task_screen_session(session_name, marker_path)
 
             launch = shell_body
             if log_file:
                 launch = f"{launch} >> {shlex.quote(log_file)} 2>&1"
-            remote_command = f"screen -dmS {shlex.quote(session_name)} bash -lc {shlex.quote(launch)}"
+            marker_cmd = shlex.quote(marker_path)
+            wrapped_launch = (
+                f"touch {marker_cmd}; "
+                f"trap 'rm -f {marker_cmd}' EXIT; "
+                f"{launch}; "
+                f"status=$?; "
+                f"rm -f {marker_cmd}; "
+                f"printf '\\n[acs-manager] task exited with code %s\\n' \"$status\"; "
+                f"exec bash -i"
+            )
+            remote_command = f"screen -dmS {shlex.quote(session_name)} bash -lc {shlex.quote(wrapped_launch)}"
             outcome = self._run_remote_shell(remote_command, timeout=30, reload_config=False)
             success = bool(outcome.get("ok"))
             message = f"Task {task['title']} started in screen session {session_name}." if success else (
