@@ -297,9 +297,9 @@ class ContainerManager:
             attempts.append((label, fn, task_id))
 
         add_attempt("instance detail", self.container_client.get_instance_detail, task.get("instanceServiceId"))
-        add_attempt("notebook detail", self.container_client.get_notebook_task_detail, task.get("taskId"))
-        add_attempt("instance detail", self.container_client.get_instance_detail, task.get("id"))
         add_attempt("notebook detail", self.container_client.get_notebook_task_detail, task.get("id"))
+        add_attempt("instance detail", self.container_client.get_instance_detail, task.get("id"))
+        add_attempt("notebook detail", self.container_client.get_notebook_task_detail, task.get("taskId"))
 
         last_exc: Optional[Exception] = None
         for label, fn, task_id in attempts:

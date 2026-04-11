@@ -535,13 +535,17 @@ class ContainerClient:
             info["instanceServiceId"] = instance_service_id
         notebook_task_id = (
             source_task.get("taskId")
-            or source_task.get("id")
             or task.get("taskId")
-            or task.get("id")
-            or task_id
         )
         if notebook_task_id:
             info["taskId"] = notebook_task_id
+        notebook_record_id = (
+            source_task.get("id")
+            or task.get("id")
+            or task_id
+        )
+        if notebook_record_id:
+            info["id"] = notebook_record_id
         if source_task.get("taskName"):
             info["taskName"] = source_task.get("taskName")
         return info
@@ -573,7 +577,9 @@ class ContainerClient:
         service_type = self._service_type(reload=False)
 
         if service_type == "notebook":
-            notebook_task_id = task.get("taskId") or task.get("id") or task.get("instanceServiceId")
+            # Notebook detail/instance endpoints expect the notebook record id
+            # returned by /api/tasks, not the numeric taskId field.
+            notebook_task_id = task.get("id") or task.get("taskId") or task.get("instanceServiceId")
             if not notebook_task_id:
                 return None
             return self._get_notebook_instance_info(task, str(notebook_task_id))
