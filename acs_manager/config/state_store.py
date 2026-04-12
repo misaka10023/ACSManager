@@ -52,6 +52,32 @@ class RuntimeStateStore:
             self._write(data)
             return dict(merged)
 
+    def rename_container(self, old_container_id: str, new_container_id: str) -> None:
+        with self._lock:
+            if not old_container_id or not new_container_id or old_container_id == new_container_id:
+                return
+            data = self._read()
+            containers = data.get("containers")
+            if not isinstance(containers, dict):
+                return
+            current = containers.pop(str(old_container_id), None)
+            if current is None:
+                return
+            containers[str(new_container_id)] = current
+            data["containers"] = containers
+            self._write(data)
+
+    def delete_container(self, container_id: str) -> None:
+        with self._lock:
+            data = self._read()
+            containers = data.get("containers")
+            if not isinstance(containers, dict):
+                return
+            if str(container_id) in containers:
+                containers.pop(str(container_id), None)
+                data["containers"] = containers
+                self._write(data)
+
     def read_task(self, container_id: str, task_id: str) -> Dict[str, Any]:
         container_state = self.read_container(container_id)
         tasks = container_state.get("tasks") or {}

@@ -838,6 +838,13 @@
   }
 
   function initConfig() {
+    if (window.ConfigWorkbench && typeof window.ConfigWorkbench.init === 'function') {
+      Promise.resolve(window.ConfigWorkbench.init()).catch((err) => {
+        console.error('Failed to initialize config workbench', err);
+        showToast(`配置页初始化失败: ${err}`, 'error');
+      });
+      return;
+    }
     loadTasks();
     loadConfig();
     bindContainerActions();
@@ -890,6 +897,13 @@
   }
 
   // ---------- Boot ----------
+  window.ACSManagerWebUI = {
+    withBase,
+    fetchJSON,
+    showToast,
+    hideToast,
+  };
+
   const toastClose = document.getElementById('app-toast-close');
   if (toastClose) toastClose.addEventListener('click', hideToast);
   const updateBtn = document.getElementById('app-update');

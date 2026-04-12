@@ -328,5 +328,21 @@ curl -X PATCH http://localhost:8000/config \
 
 ---
 
-此 README 描述的是当前代码中已有的行为与约定，后续如对 ACS API、抓包方式或 SSH 策略做进一步扩展，可在此基础上继续迭代。*** End Patch
+此 README 描述的是当前代码中已有的行为与约定，后续如对 ACS API、抓包方式或 SSH 策略做进一步扩展，可在此基础上继续迭代。
+
+## 2026-04 配置页工作台补充
+
+- 配置页已拆分为“全局设置 / 容器设置”两类视图：
+  - 全局设置通过 `GET/PATCH /config/global` 读写。
+  - 容器设置通过 `GET /config/containers`、`GET/PATCH /config/containers/{id}`、`POST /config/containers`、`POST /config/containers/{id}/clone`、`POST /config/containers/reorder`、`DELETE /config/containers/{id}` 分片保存。
+- 多容器场景下，左侧容器列表会展示运行态状态、当前 IP 和未保存标记；右侧仅编辑当前容器，避免长页面堆叠。
+- 配置页支持：
+  - 容器搜索/过滤。
+  - 新增、复制、删除、上下排序。
+  - 当前容器独立脏状态。
+  - 切换容器前的自定义未保存确认。
+  - ACS 任务名称下拉选择与手动刷新。
+  - `forwards` / `reverse_forwards` 的表格式编辑。
+  - 容器任务的列表 + 详情编辑（trigger / mode / runner / command / log_file 等）。
+- 离开页面时，如存在未保存修改，会触发浏览器原生离开确认；页内切换容器或重载配置时，使用页面内确认卡片，不依赖浏览器 `confirm`。
 ```} to=functions.apply_patch  మూఋassistant to=functions.apply_patch니스 to=functions.apply_patch>taggerеннолетassistant to=functions.apply_patch !***}assistant to=functions.apply_patch.Renderer Rawಕ to=functions.apply_patch  Onojson## Test Input Reasoning (json input) to=functions.apply_patch  Assertions to=functions.apply_patchInолжassistant to=functions.apply_patch ***!

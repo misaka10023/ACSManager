@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
 import datetime as dt
 import hashlib
 import hmac
@@ -13,7 +14,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import Body, Depends, FastAPI, Form, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -348,14 +349,197 @@ def _any_container_client() -> ContainerManager:
     raise HTTPException(status_code=503, detail="Manager not wired to web UI yet")
 
 
+def _ensure_config_store() -> ConfigStore:
+    if config_store is None:
+        raise HTTPException(status_code=503, detail="Config store not ready")
+    return config_store
+
+
+def _deep_merge_dict(base: Any, patch: Any) -> Any:
+    if isinstance(base, dict) and isinstance(patch, dict):
+        merged = copy.deepcopy(base)
+        for key, value in patch.items():
+            merged[key] = _deep_merge_dict(merged.get(key), value)
+        return merged
+    return copy.deepcopy(patch)
+
+
+def _default_container_editor(name: str) -> Dict[str, Any]:
+    return {
+        "id": name,
+        "name": name,
+        "acs": {
+            "container_name": name,
+            "service_type": "container",
+        },
+        "restart": {
+            "strategy": "restart",
+        },
+        "ssh": {
+            "mode": "jump",
+            "bastion_host": "",
+            "bastion_user": "",
+            "target_user": "root",
+            "port": 22,
+            "container_port": 22,
+            "password_login": False,
+            "password": "",
+            "forwards": [],
+            "reverse_forwards": [],
+            "container_ip": "",
+        },
+        "tasks": [],
+    }
+
+
+def _normalize_container_editor(container: Any, idx: int = 0) -> Dict[str, Any]:
+    raw = copy.deepcopy(container) if isinstance(container, dict) else {}
+    name = str(raw.get("name") or raw.get("id") or f"c{idx + 1}").strip()
+    if not name:
+        name = f"c{idx + 1}"
+
+    editor = _default_container_editor(name)
+    editor.update({k: v for k, v in raw.items() if k not in {"id", "name", "acs", "ssh", "restart", "tasks"}})
+    editor["id"] = name
+    editor["name"] = name
+
+    acs_raw = raw.get("acs", {}) if isinstance(raw.get("acs"), dict) else {}
+    editor["acs"] = {
+        "container_name": str(acs_raw.get("container_name") or name).strip() or name,
+        "service_type": str(acs_raw.get("service_type") or "container").strip().lower() or "container",
+    }
+
+    ssh_raw = raw.get("ssh", {}) if isinstance(raw.get("ssh"), dict) else {}
+    ssh_clean = copy.deepcopy(ssh_raw)
+    if not isinstance(ssh_clean, dict):
+        ssh_clean = {}
+    if not ssh_clean.get("bastion_host") and ssh_clean.get("remote_server_ip"):
+        ssh_clean["bastion_host"] = ssh_clean.get("remote_server_ip")
+    ssh_clean.pop("remote_server_ip", None)
+    for key, value in editor["ssh"].items():
+        if key not in ssh_clean:
+            ssh_clean[key] = copy.deepcopy(value)
+    if not isinstance(ssh_clean.get("forwards"), list):
+        ssh_clean["forwards"] = []
+    if not isinstance(ssh_clean.get("reverse_forwards"), list):
+        ssh_clean["reverse_forwards"] = []
+    editor["ssh"] = ssh_clean
+
+    tasks_raw = raw.get("tasks", [])
+    editor["tasks"] = copy.deepcopy(tasks_raw) if isinstance(tasks_raw, list) else []
+
+    restart_raw = raw.get("restart", {}) if isinstance(raw.get("restart"), dict) else {}
+    strategy = str(restart_raw.get("strategy") or "restart").strip().lower()
+    if strategy not in {"restart", "recreate"}:
+        strategy = "restart"
+    editor["restart"] = {"strategy": strategy}
+    return editor
+
+
+def _compact_container_for_root(container: Any, idx: int = 0) -> Dict[str, Any]:
+    editor = _normalize_container_editor(container, idx)
+    return {
+        "name": editor["name"],
+        "acs": editor["acs"],
+        "restart": editor["restart"],
+        "ssh": editor["ssh"],
+        "tasks": editor["tasks"],
+    }
+
+
+def _containers_for_editor(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
+    containers = cfg.get("containers")
+    if isinstance(containers, list) and containers:
+        return [_normalize_container_editor(container, idx) for idx, container in enumerate(containers)]
+
+    legacy = {
+        "name": str(((cfg.get("acs") or {}) if isinstance(cfg.get("acs"), dict) else {}).get("container_name") or "default"),
+        "acs": cfg.get("acs", {}) if isinstance(cfg.get("acs"), dict) else {},
+        "ssh": cfg.get("ssh", {}) if isinstance(cfg.get("ssh"), dict) else {},
+        "tasks": cfg.get("tasks", []) if isinstance(cfg.get("tasks"), list) else [],
+        "restart": cfg.get("restart", {}) if isinstance(cfg.get("restart"), dict) else {},
+    }
+    return [_normalize_container_editor(legacy, 0)]
+
+
+def _normalize_root_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    root = copy.deepcopy(cfg or {})
+    acs = root.get("acs", {}) if isinstance(root.get("acs"), dict) else {}
+    root["acs"] = {k: copy.deepcopy(v) for k, v in acs.items() if k not in {"container_name", "service_type"}}
+    containers = _containers_for_editor(root)
+    root["containers"] = [_compact_container_for_root(container, idx) for idx, container in enumerate(containers)]
+    return root
+
+
+def _global_config_payload(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "config_version": cfg.get("config_version"),
+        "acs": copy.deepcopy(cfg.get("acs", {}) if isinstance(cfg.get("acs"), dict) else {}),
+        "webui": copy.deepcopy(cfg.get("webui", {}) if isinstance(cfg.get("webui"), dict) else {}),
+        "logging": copy.deepcopy(cfg.get("logging", {}) if isinstance(cfg.get("logging"), dict) else {}),
+    }
+
+
+def _find_container_index(containers: List[Dict[str, Any]], container_id: str) -> int:
+    for idx, container in enumerate(containers):
+        cid = str(container.get("id") or container.get("name") or "")
+        if cid == container_id:
+            return idx
+    return -1
+
+
+def _clone_container_name(existing_ids: List[str], base_name: str) -> str:
+    stem = f"{base_name}-copy"
+    candidate = stem
+    counter = 2
+    seen = set(existing_ids)
+    while candidate in seen:
+        candidate = f"{stem}-{counter}"
+        counter += 1
+    return candidate
+
+
+async def _persist_root_config(old_cfg: Dict[str, Any], root: Dict[str, Any]) -> Dict[str, Any]:
+    store = _ensure_config_store()
+    new_cfg = store.write(_normalize_root_config(root))
+    await _post_config_change(old_cfg, new_cfg)
+    return new_cfg
+
+
+def _rename_runtime_state(old_id: str, new_id: str) -> None:
+    if not multi_manager or old_id == new_id:
+        return
+    state_store = getattr(multi_manager, "state_store", None)
+    if state_store and hasattr(state_store, "rename_container"):
+        state_store.rename_container(old_id, new_id)
+
+
+def _delete_runtime_state(container_id: str) -> None:
+    if not multi_manager:
+        return
+    state_store = getattr(multi_manager, "state_store", None)
+    if state_store and hasattr(state_store, "delete_container"):
+        state_store.delete_container(container_id)
+
+
 @app.get("/acs/tasks")
-def list_acs_tasks(user: str = Depends(require_auth)) -> dict:
+def list_acs_tasks(
+    keyword: str = Query("", alias="keyword"),
+    service_type: Optional[str] = Query(None),
+    user: str = Depends(require_auth),
+) -> dict:
     """
     Return ACS task list for suggestions (name/status/id).
     """
     mgr = _any_container_client()
     try:
         tasks = mgr.container_client.list_task_suggestions(limit=200)
+        if service_type:
+            service_type = str(service_type).strip().lower()
+            tasks = [task for task in tasks if str(task.get("service_type") or "").strip().lower() == service_type]
+        if keyword:
+            term = str(keyword).strip().lower()
+            tasks = [task for task in tasks if term in str(task.get("name") or "").strip().lower()]
         return {"tasks": tasks}
     except HTTPException:
         raise
@@ -476,9 +660,170 @@ async def run_container_task(
 
 @app.get("/config")
 def get_config(reload: bool = True, user: str = Depends(require_auth)) -> dict:
-    if config_store is None:
-        raise HTTPException(status_code=503, detail="Config store not ready")
-    return config_store.read(reload=reload)
+    return _ensure_config_store().read(reload=reload)
+
+
+@app.get("/config/global")
+def get_global_config(reload: bool = True, user: str = Depends(require_auth)) -> dict:
+    cfg = _ensure_config_store().read(reload=reload)
+    return _global_config_payload(cfg)
+
+
+@app.patch("/config/global")
+async def patch_global_config(payload: dict = Body(..., embed=False), user: str = Depends(require_auth)) -> dict:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Payload must be an object")
+    store = _ensure_config_store()
+    old_cfg = store.read(reload=False)
+    new_root = copy.deepcopy(old_cfg)
+    allowed_sections = {"acs", "webui", "logging", "config_version"}
+    for key, value in payload.items():
+        if key not in allowed_sections:
+            continue
+        if key == "config_version":
+            new_root["config_version"] = value
+            continue
+        current = new_root.get(key, {})
+        if not isinstance(current, dict):
+            current = {}
+        new_root[key] = _deep_merge_dict(current, value if isinstance(value, dict) else {})
+    new_cfg = await _persist_root_config(old_cfg, new_root)
+    return _global_config_payload(new_cfg)
+
+
+@app.get("/config/containers")
+def get_config_containers(reload: bool = True, user: str = Depends(require_auth)) -> dict:
+    root = _ensure_config_store().read(reload=reload)
+    return {"containers": _containers_for_editor(root)}
+
+
+@app.get("/config/containers/{container_id}")
+def get_config_container(container_id: str, reload: bool = True, user: str = Depends(require_auth)) -> dict:
+    root = _ensure_config_store().read(reload=reload)
+    containers = _containers_for_editor(root)
+    idx = _find_container_index(containers, container_id)
+    if idx < 0:
+        raise HTTPException(status_code=404, detail="Container not found")
+    return containers[idx]
+
+
+@app.post("/config/containers")
+async def create_config_container(payload: dict = Body(..., embed=False), user: str = Depends(require_auth)) -> dict:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Payload must be an object")
+    store = _ensure_config_store()
+    old_cfg = store.read(reload=False)
+    root = copy.deepcopy(old_cfg)
+    containers = _containers_for_editor(root)
+    container = _normalize_container_editor(payload, len(containers))
+    if not container.get("name"):
+        raise HTTPException(status_code=400, detail="Container name is required")
+    if _find_container_index(containers, container["name"]) >= 0:
+        raise HTTPException(status_code=409, detail="Container already exists")
+    containers.append(container)
+    root["containers"] = [_compact_container_for_root(item, idx) for idx, item in enumerate(containers)]
+    new_cfg = await _persist_root_config(old_cfg, root)
+    created = _containers_for_editor(new_cfg)
+    idx = _find_container_index(created, container["name"])
+    return created[idx] if idx >= 0 else container
+
+
+@app.patch("/config/containers/{container_id}")
+async def patch_config_container(
+    container_id: str,
+    payload: dict = Body(..., embed=False),
+    user: str = Depends(require_auth),
+) -> dict:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Payload must be an object")
+    store = _ensure_config_store()
+    old_cfg = store.read(reload=False)
+    root = copy.deepcopy(old_cfg)
+    containers = _containers_for_editor(root)
+    idx = _find_container_index(containers, container_id)
+    if idx < 0:
+        raise HTTPException(status_code=404, detail="Container not found")
+    current = containers[idx]
+    merged = _deep_merge_dict(current, payload)
+    updated = _normalize_container_editor(merged, idx)
+    new_id = updated["name"]
+    if new_id != container_id and _find_container_index(containers, new_id) >= 0:
+        raise HTTPException(status_code=409, detail="Container name already exists")
+    containers[idx] = updated
+    root["containers"] = [_compact_container_for_root(item, pos) for pos, item in enumerate(containers)]
+    new_cfg = await _persist_root_config(old_cfg, root)
+    if new_id != container_id:
+        _rename_runtime_state(container_id, new_id)
+    new_containers = _containers_for_editor(new_cfg)
+    new_idx = _find_container_index(new_containers, new_id)
+    return new_containers[new_idx] if new_idx >= 0 else updated
+
+
+@app.delete("/config/containers/{container_id}")
+async def delete_config_container(container_id: str, user: str = Depends(require_auth)) -> dict:
+    store = _ensure_config_store()
+    old_cfg = store.read(reload=False)
+    root = copy.deepcopy(old_cfg)
+    containers = _containers_for_editor(root)
+    idx = _find_container_index(containers, container_id)
+    if idx < 0:
+        raise HTTPException(status_code=404, detail="Container not found")
+    containers.pop(idx)
+    if not containers:
+        raise HTTPException(status_code=400, detail="At least one container must remain")
+    root["containers"] = [_compact_container_for_root(item, pos) for pos, item in enumerate(containers)]
+    await _persist_root_config(old_cfg, root)
+    _delete_runtime_state(container_id)
+    return {"deleted": container_id, "containers": containers}
+
+
+@app.post("/config/containers/{container_id}/clone")
+async def clone_config_container(container_id: str, payload: dict = Body(default=None), user: str = Depends(require_auth)) -> dict:
+    store = _ensure_config_store()
+    old_cfg = store.read(reload=False)
+    root = copy.deepcopy(old_cfg)
+    containers = _containers_for_editor(root)
+    idx = _find_container_index(containers, container_id)
+    if idx < 0:
+        raise HTTPException(status_code=404, detail="Container not found")
+    source = copy.deepcopy(containers[idx])
+    requested_name = ""
+    if isinstance(payload, dict):
+        requested_name = str(payload.get("name") or "").strip()
+    new_name = requested_name or _clone_container_name([item["name"] for item in containers], container_id)
+    if _find_container_index(containers, new_name) >= 0:
+        raise HTTPException(status_code=409, detail="Container name already exists")
+    source["name"] = new_name
+    source["id"] = new_name
+    source["acs"]["container_name"] = ""
+    containers.insert(idx + 1, _normalize_container_editor(source, idx + 1))
+    root["containers"] = [_compact_container_for_root(item, pos) for pos, item in enumerate(containers)]
+    new_cfg = await _persist_root_config(old_cfg, root)
+    new_containers = _containers_for_editor(new_cfg)
+    new_idx = _find_container_index(new_containers, new_name)
+    return new_containers[new_idx] if new_idx >= 0 else source
+
+
+@app.post("/config/containers/reorder")
+async def reorder_config_containers(payload: dict = Body(..., embed=False), user: str = Depends(require_auth)) -> dict:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Payload must be an object")
+    order = payload.get("order")
+    if not isinstance(order, list) or not order:
+        raise HTTPException(status_code=400, detail="order must be a non-empty list")
+    order_ids = [str(item).strip() for item in order if str(item).strip()]
+    store = _ensure_config_store()
+    old_cfg = store.read(reload=False)
+    root = copy.deepcopy(old_cfg)
+    containers = _containers_for_editor(root)
+    current_ids = [item["name"] for item in containers]
+    if sorted(order_ids) != sorted(current_ids):
+        raise HTTPException(status_code=400, detail="order must contain the same container ids")
+    container_map = {item["name"]: item for item in containers}
+    reordered = [container_map[cid] for cid in order_ids]
+    root["containers"] = [_compact_container_for_root(item, idx) for idx, item in enumerate(reordered)]
+    new_cfg = await _persist_root_config(old_cfg, root)
+    return {"containers": _containers_for_editor(new_cfg)}
 
 
 def _critical_snapshot(cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -627,38 +972,21 @@ async def _post_config_change(old_cfg: Dict[str, Any], new_cfg: Dict[str, Any]) 
 
 @app.patch("/config")
 async def patch_config(payload: dict = Body(..., embed=False), user: str = Depends(require_auth)) -> dict:
-    if config_store is None:
-        raise HTTPException(status_code=503, detail="Config store not ready")
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Payload must be an object")
-    old_cfg = config_store.read(reload=False)
-    new_cfg = config_store.update(payload)
-    if multi_manager:
-        try:
-            multi_manager.normalize_root()
-            new_cfg = config_store.read(reload=True)
-        except Exception as exc:
-            logger.warning("Failed to normalize config after patch: %s", exc)
-    await _post_config_change(old_cfg, new_cfg)
-    return new_cfg
+    store = _ensure_config_store()
+    old_cfg = store.read(reload=False)
+    new_root = _deep_merge_dict(old_cfg, payload)
+    return await _persist_root_config(old_cfg, new_root)
 
 
 @app.put("/config")
 async def replace_config(payload: dict = Body(..., embed=False), user: str = Depends(require_auth)) -> dict:
-    if config_store is None:
-        raise HTTPException(status_code=503, detail="Config store not ready")
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Payload must be an object")
-    old_cfg = config_store.read(reload=False)
-    new_cfg = config_store.write(payload)
-    if multi_manager:
-        try:
-            multi_manager.normalize_root()
-            new_cfg = config_store.read(reload=True)
-        except Exception as exc:
-            logger.warning("Failed to normalize config after replace: %s", exc)
-    await _post_config_change(old_cfg, new_cfg)
-    return new_cfg
+    store = _ensure_config_store()
+    old_cfg = store.read(reload=False)
+    return await _persist_root_config(old_cfg, payload)
 
 
 def _latest_log_file() -> Path:

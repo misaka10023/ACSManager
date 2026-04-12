@@ -56,6 +56,8 @@
       link.classList.toggle("nav-link-active", isActive);
     });
   </script>
+  {% block pre_app_scripts %}{% endblock %}
   <script src="{{ url_for('static', path='js/app.js') }}"></script>
+  {% block extra_scripts %}{% endblock %}
 </body>
 </html>

@@ -1,135 +1,61 @@
 {% extends "base.html" %}
+{% block pre_app_scripts %}
+  <script src="{{ url_for('static', path='js/config-workbench.js') }}"></script>
+{% endblock %}
 {% block content %}
-<div class="space-y-6" data-page="config">
-  <div class="card p-6 lg:p-8 shadow-2xl shadow-indigo-500/15">
-    <div class="flex flex-wrap items-start justify-between gap-4 mb-4">
-      <div>
-        <h1 class="text-xl font-semibold text-slate-900">配置修改</h1>
-        <p class="text-sm text-slate-600 mt-1">UTF-8 配置；root_path 与反代前缀一致；使用 password_hash 时清空 password；转发格式 <code>本地:远端</code> 或 <code>本地:远端:中间端口</code>。</p>
+<div class="config-shell" data-page="config">
+  <section class="card config-hero">
+    <div class="config-hero-copy">
+      <span class="badge">System Settings</span>
+      <h1 class="config-hero-title">配置修改</h1>
+      <p class="config-hero-text">
+        全局设置与容器设置分离管理。左侧容器列表适合多容器场景；右侧只编辑当前容器，减少长表单滚动与误操作。
+      </p>
+    </div>
+    <div class="config-summary-grid">
+      <div class="config-summary-card">
+        <div class="config-summary-label">配置版本</div>
+        <div class="config-summary-value" id="cfg-version-badge">-</div>
       </div>
-      <div class="flex gap-3">
-        <button id="cfg-load" class="btn btn-secondary">重新载入</button>
-        <button id="cfg-save" class="btn btn-primary">保存配置</button>
+      <div class="config-summary-card">
+        <div class="config-summary-label">容器数量</div>
+        <div class="config-summary-value" id="cfg-container-count">-</div>
+      </div>
+      <div class="config-summary-card">
+        <div class="config-summary-label">未保存项</div>
+        <div class="config-summary-value" id="cfg-dirty-count">-</div>
       </div>
     </div>
+  </section>
 
-    <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
-      <datalist id="acs-task-options"></datalist>
-      <!-- Account / ACS -->
-      <section class="card-section space-y-3">
-        <div>
-          <div class="text-sm font-semibold text-slate-900">Account</div>
-          <div class="text-[12px] text-slate-500">全局 ACS（登录 / 公钥 / Cookies）</div>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <label class="flex flex-col gap-1 text-xs text-slate-600">Base URL
-            <input id="acs-base-url" type="text" class="input" placeholder="http://192.168.10.200:6080">
-          </label>
-          <label class="flex flex-col gap-1 text-xs text-slate-600">API 前缀
-            <input id="acs-api-prefix" type="text" class="input" placeholder="/sothisai">
-          </label>
-          <label class="flex flex-col gap-1 text-xs text-slate-600">登录用户
-            <input id="acs-login-user" type="text" class="input" placeholder="必填">
-          </label>
-          <label class="flex flex-col gap-1 text-xs text-slate-600">登录密码
-            <input id="acs-login-password" type="text" class="input" placeholder="必填">
-          </label>
-          <label class="flex flex-col gap-1 text-xs text-slate-600">用户类型
-            <input id="acs-user-type" type="text" class="input" placeholder="os">
-          </label>
-          <label class="flex flex-col gap-1 text-xs text-slate-600">公钥(Base64)
-            <input id="acs-public-key" type="text" class="input" placeholder="可选，用于加密密码">
-          </label>
-          <label class="flex items-center gap-2 text-xs text-slate-600">
-            <input id="acs-verify-ssl" type="checkbox" class="checkbox">
-            验证 SSL
-          </label>
-          <label class="flex flex-col gap-1 text-xs text-slate-600">JSESSIONID
-            <input id="acs-cookie-jsessionid" type="text" class="input" placeholder="可空">
-          </label>
-          <label class="flex flex-col gap-1 text-xs text-slate-600">GV_JSESSIONID
-            <input id="acs-cookie-gv" type="text" class="input" placeholder="可空">
-          </label>
-        </div>
-      </section>
-
-      <!-- Network + Security -->
-      <section class="card-section space-y-4">
-        <div class="space-y-1">
-          <div class="text-sm font-semibold text-slate-900">Network</div>
-          <div class="text-[12px] text-slate-500">Web UI 网络入口</div>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <label class="flex flex-col gap-1 text-xs text-slate-600">Host
-            <input id="webui-host" type="text" class="input" placeholder="0.0.0.0">
-          </label>
-          <label class="flex flex-col gap-1 text-xs text-slate-600">Port
-            <input id="webui-port" type="number" class="input" placeholder="8000">
-          </label>
-          <label class="flex flex-col gap-1 text-xs text-slate-600">Root Path
-            <input id="webui-root-path" type="text" class="input" placeholder="/acsmanager">
-          </label>
-        </div>
-
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <div>
-              <div class="text-sm font-semibold text-slate-900">Security</div>
-              <div class="text-[12px] text-slate-500">Web UI 登录与会话（使用 password_hash 时清空 password）</div>
-            </div>
-          </div>
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <label class="flex items-center gap-2 text-xs text-slate-600">
-              <input id="auth-enabled" type="checkbox" class="checkbox">
-              启用登录
-            </label>
-            <label class="flex flex-col gap-1 text-xs text-slate-600">用户名
-              <input id="auth-username" type="text" class="input" placeholder="admin">
-            </label>
-            <label class="flex flex-col gap-1 text-xs text-slate-600">密码
-              <input id="auth-password" type="text" class="input" placeholder="change-me">
-            </label>
-            <label class="flex flex-col gap-1 text-xs text-slate-600">密码哈希
-              <input id="auth-password-hash" type="text" class="input" placeholder="sha256">
-            </label>
-            <label class="flex flex-col gap-1 text-xs text-slate-600">Secret Key
-              <input id="auth-secret-key" type="text" class="input" placeholder="change-me-please">
-            </label>
-            <label class="flex flex-col gap-1 text-xs text-slate-600">Session TTL(秒)
-              <input id="auth-session-ttl" type="number" class="input" placeholder="43200">
-            </label>
-          </div>
-        </div>
-      </section>
-
-      <!-- Observability -->
-      <section class="card-section space-y-2">
-        <div>
-          <div class="text-sm font-semibold text-slate-900">Observability</div>
-          <div class="text-[12px] text-slate-500">日志级别</div>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <label class="flex flex-col gap-1 text-xs text-slate-600">Level
-            <input id="log-level" type="text" class="input" placeholder="INFO">
-          </label>
-        </div>
-      </section>
-
-      <!-- Containers -->
-      <section class="card-section space-y-3 xl:col-span-2">
-        <div class="flex items-center justify-between gap-3">
-          <div>
-            <div class="text-sm font-semibold text-slate-900">Containers</div>
-            <div class="text-[12px] text-slate-500">ACS 名称、重启策略、SSH、转发与容器任务</div>
-          </div>
-          <button id="container-add" class="btn btn-secondary btn-xxs">添加容器</button>
-        </div>
-        <p class="text-xs text-slate-500">容器名、ACS 容器名必填；可为每个容器配置自动任务和手动任务。</p>
-        <div id="container-form-list" class="space-y-3"></div>
-      </section>
+  <section class="card config-toolbar">
+    <div class="config-toolbar-main">
+      <div class="config-tabs" role="tablist" aria-label="配置页面标签">
+        <button id="cfg-tab-containers" class="config-tab is-active" type="button" data-tab="containers">容器设置</button>
+        <button id="cfg-tab-global" class="config-tab" type="button" data-tab="global">全局设置</button>
+      </div>
+      <div class="config-toolbar-status">
+        <div class="config-status-line" id="cfg-status">准备就绪</div>
+        <div class="helper" id="cfg-last-saved">尚未保存</div>
+      </div>
     </div>
+    <div class="config-toolbar-actions">
+      <button id="cfg-load" class="btn btn-secondary" type="button">重新加载</button>
+      <button id="cfg-save" class="btn btn-primary" type="button">保存当前内容</button>
+    </div>
+  </section>
 
-    <div id="cfg-status" class="text-sm text-slate-700 mt-4"></div>
+  <div class="config-grid" id="cfg-grid">
+    <aside class="card config-sidebar" id="cfg-sidebar"></aside>
+    <section class="config-stage" id="cfg-stage"></section>
+  </div>
+</div>
+
+<div id="cfg-dialog" class="dialog-mask hidden" aria-hidden="true">
+  <div class="card dialog-panel">
+    <div class="dialog-title" id="cfg-dialog-title">确认操作</div>
+    <div class="text-sm text-slate-600" id="cfg-dialog-message"></div>
+    <div class="dialog-actions" id="cfg-dialog-actions"></div>
   </div>
 </div>
 {% endblock %}
