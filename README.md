@@ -147,12 +147,3 @@ location /acsmanager/ {
 ```
 
 如果使用 FRP 映射端口，先确认本地 `http://localhost:8000/acsmanager/ui/dashboard` 正常，再检查公网 Nginx 到 FRP 端口的转发。
-
-## 维护与排障
-
-- 修改 `config/local/settings.yaml` 后，通过网页界面保存会触发关键配置检查，必要时自动重新登录 ACS 或重启 SSH 隧道。
-- 当 ACS 接口出现 502、404 或登录失败时，已有 IP 不会被清空；无法获取新 IP 时会继续使用当前记录或兜底 IP。
-- 如果容器状态异常且能正常查询任务列表，监控逻辑会按策略尝试重启或重建。
-- `screen` 任务会保留可进入的会话，便于查看常驻服务输出。
-- `config/old/` 保存配置版本迁移前的备份。
-- `.gitignore`、`ACSManager.bat`、`config/local/`、`state/`、`logs/` 等本地文件不应提交。
