@@ -282,7 +282,7 @@ class ContainerManager:
                     seen.add(value)
         return ids
 
-    def _load_recreate_detail(self, task: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _load_recreate_detail(self, task: Dict[str, Any], service_type: str = "container") -> Optional[Dict[str, Any]]:
         attempts: List[tuple[str, Any, str]] = []
         seen: set[tuple[str, str]] = set()
 
@@ -296,10 +296,11 @@ class ContainerManager:
             seen.add(key)
             attempts.append((label, fn, task_id))
 
-        add_attempt("instance detail", self.container_client.get_instance_detail, task.get("instanceServiceId"))
-        add_attempt("notebook detail", self.container_client.get_notebook_task_detail, task.get("id"))
-        add_attempt("instance detail", self.container_client.get_instance_detail, task.get("id"))
-        add_attempt("notebook detail", self.container_client.get_notebook_task_detail, task.get("taskId"))
+        if service_type == "notebook":
+            add_attempt("notebook detail", self.container_client.get_notebook_record_detail, task.get("id"))
+        else:
+            add_attempt("instance detail", self.container_client.get_instance_detail, task.get("instanceServiceId"))
+            add_attempt("instance detail", self.container_client.get_instance_detail, task.get("id"))
 
         last_exc: Optional[Exception] = None
         for label, fn, task_id in attempts:
@@ -317,6 +318,8 @@ class ContainerManager:
 
         if last_exc:
             logger.error("Failed to fetch task detail for recreate: %s", last_exc)
+        if service_type == "notebook" and task:
+            return dict(task)
         return None
 
     def _recreate_container_task(self, base_name: str, task: Dict[str, Any]) -> bool:
@@ -331,7 +334,7 @@ class ContainerManager:
         timestamp = dt.datetime.now().strftime("%Y%m%d%H%M%S")
         new_name = f"{base_name}_{new_count}_{timestamp}"
 
-        data = self._load_recreate_detail(task)
+        data = self._load_recreate_detail(task, "container")
         if not isinstance(data, dict):
             logger.error("Unexpected detail format when recreating task %s", task_id)
             return False
@@ -398,13 +401,95 @@ class ContainerManager:
             self.state["last_restart"] = dt.datetime.now()
             logger.info("Created new task %s from %s: %s", new_name, base_name, resp)
             try:
-                # Persist the new ACS container name so后续 IP 解析/隧道重启使用新任务
+                # Persist the new ACS task name for future IP resolution and tunnel restarts.
                 self.store.update({"acs": {"container_name": new_name}})
             except Exception as exc:  # pragma: no cover - IO errors
                 logger.warning("Failed to persist new container_name %s: %s", new_name, exc)
             return True
 
         logger.error("Create new task failed: %s", resp)
+        return False
+
+    def _recreate_notebook_task(self, base_name: str, task: Dict[str, Any]) -> bool:
+        """Create a new Notebook task with the same resource shape."""
+        task_id = task.get("id")
+        if not task_id:
+            logger.error("Cannot recreate notebook task without notebook record id.")
+            return False
+
+        restart_cfg = self._restart_cfg(reload=False)
+        new_count = restart_cfg.get("create_count", 0) + 1
+        timestamp = dt.datetime.now().strftime("%Y%m%d%H%M%S")
+        new_name = f"{base_name}_{new_count}_{timestamp}"
+
+        data = self._load_recreate_detail(task, "notebook")
+        if not isinstance(data, dict):
+            logger.error("Unexpected detail format when recreating notebook task %s", task_id)
+            return False
+
+        payload: Dict[str, Any] = {}
+        allowed_keys = [
+            "description",
+            "type",
+            "acceleratorType",
+            "imagePath",
+            "imageVersion",
+            "resourceSpec",
+            "resourceGroup",
+            "cpuNumber",
+            "ramSize",
+            "gpuNumber",
+            "maxWallTime",
+            "timeoutLimit",
+            "useStartScript",
+        ]
+        for key in allowed_keys:
+            if key in data and data[key] is not None:
+                payload[key] = data[key]
+
+        payload["notebookName"] = new_name
+        payload.setdefault("description", data.get("description", ""))
+        payload.setdefault("type", data.get("type") or data.get("taskType") or "jupyter")
+        payload.setdefault("acceleratorType", data.get("acceleratorType") or "gpu")
+        payload.setdefault("imagePath", data.get("imagePath") or "")
+        payload.setdefault("imageVersion", data.get("imageVersion") or data.get("version") or "")
+        payload.setdefault("resourceSpec", data.get("resourceSpec") or "")
+        payload.setdefault("resourceGroup", data.get("resourceGroup") or "default")
+        payload.setdefault("cpuNumber", data.get("cpuNumber") or 1)
+        payload.setdefault("ramSize", data.get("ramSize") or 1024)
+        payload.setdefault("gpuNumber", data.get("gpuNumber") or 0)
+        payload.setdefault("maxWallTime", data.get("maxWallTime") or "unlimited")
+        if not payload.get("timeoutLimit") and payload.get("maxWallTime") not in {None, "", "unlimited"}:
+            payload["timeoutLimit"] = payload["maxWallTime"]
+        if payload.get("timeoutLimit") == "unlimited":
+            payload["timeoutLimit"] = ""
+        payload["autoTerminated"] = 1 if payload.get("timeoutLimit") else 0
+
+        try:
+            resp = self.container_client.create_notebook_task(payload)
+        except Exception as exc:
+            logger.error("Create new notebook task failed: %s", exc)
+            return False
+
+        if str(resp.get("code")) == "0":
+            restart_cfg.update(
+                {
+                    "strategy": restart_cfg.get("strategy") or "recreate",
+                    "create_count": new_count,
+                    "last_created_at": dt.datetime.now().isoformat(),
+                    "last_created_name": new_name,
+                }
+            )
+            self._persist_restart_cfg(restart_cfg)
+            self.state["last_restart"] = dt.datetime.now()
+            logger.info("Created new notebook task %s from %s: %s", new_name, base_name, resp)
+            try:
+                self.store.update({"acs": {"container_name": new_name}})
+            except Exception as exc:  # pragma: no cover - IO errors
+                logger.warning("Failed to persist new notebook container_name %s: %s", new_name, exc)
+            return True
+
+        logger.error("Create new notebook task failed: %s", resp)
         return False
 
     async def restart_container(
@@ -426,26 +511,52 @@ class ContainerManager:
             logger.error("Failed to query container %s; cannot restart: %s", name, exc)
             task = None
 
-        container_task: Optional[Dict[str, Any]] = None
-        if service_type == "notebook":
-            try:
-                container_task = self.container_client.find_container_task_by_name(name)
-            except Exception as exc:
-                logger.warning("Failed to query container restart target for notebook %s: %s", name, exc)
-
-        restart_target = container_task or task or info
-        recreate_target = container_task or task or info
-        restart_ids = self._collect_restart_ids(container_task, info, task)
-
         restart_cfg = self._restart_cfg(reload=True)
+        restart_target = task or info
+        recreate_target = task or info
+
         if restart_cfg.get("strategy") == "recreate":
             base_name = self.display_name or name
             logger.warning("Recreate strategy enabled; creating new task for %s (base name: %s)", name, base_name)
-            created = self._recreate_container_task(base_name, recreate_target or {})
+            if service_type == "notebook":
+                created = self._recreate_notebook_task(base_name, recreate_target or {})
+            else:
+                created = self._recreate_container_task(base_name, recreate_target or {})
             if created:
                 return
-            logger.warning("Recreate task failed; falling back to restart original task.")
+            logger.error("Recreate task failed; not falling back to restart original task.")
+            return
 
+        if service_type == "notebook":
+            if not isinstance(restart_target, dict):
+                logger.error("Notebook %s not found; cannot restart.", name)
+                return
+            notebook_id = str(restart_target.get("id") or "").strip()
+            if not notebook_id:
+                logger.error("Notebook %s is missing notebook record id; cannot restart.", name)
+                return
+            timeout_limit = restart_target.get("timeoutLimit")
+            auto_terminated = restart_target.get("autoTerminated")
+            if auto_terminated is None:
+                auto_terminated = 1 if timeout_limit and timeout_limit != "unlimited" else 0
+            logger.warning("Attempting to restart notebook %s (notebook id: %s)", name, notebook_id)
+            try:
+                resp = self.container_client.restart_notebook_task(
+                    notebook_id,
+                    auto_terminated=auto_terminated,
+                    timeout_limit=timeout_limit,
+                )
+            except Exception as exc:
+                logger.error("Notebook restart API call failed: %s", exc)
+                return
+            if str(resp.get("code")) == "0":
+                logger.info("Notebook restart request accepted: %s", resp)
+                self.state["last_restart"] = dt.datetime.now()
+                return
+            logger.error("Notebook restart request failed: %s", resp)
+            return
+
+        restart_ids = self._collect_restart_ids(restart_target, info, task)
         last_resp: Optional[Dict[str, Any]] = None
         if restart_target and restart_ids:
             for task_id in restart_ids:
@@ -463,16 +574,6 @@ class ContainerManager:
                 if not self._restart_response_not_found(resp):
                     logger.error("Restart request failed: %s", resp)
                     return
-
-        if service_type == "notebook" and recreate_target:
-            base_name = self.display_name or name
-            logger.warning(
-                "Notebook restart target for %s is not restartable via instance-service; recreating task instead.",
-                name,
-            )
-            created = self._recreate_container_task(base_name, recreate_target)
-            if created:
-                return
 
         if last_resp is not None:
             logger.error("Restart request failed: %s", last_resp)

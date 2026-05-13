@@ -118,7 +118,11 @@ class ContainerScopedStore:
             cid = str(item.get("id") or item.get("name") or "")
             if cid == self.container_id:
                 updated = dict(item)
-                updated.update(changes)
+                update_payload = dict(changes)
+                if change_acs is not None:
+                    existing_acs = item.get("acs", {}) if isinstance(item.get("acs"), dict) else {}
+                    update_payload["acs"] = {**existing_acs, **container_acs_delta}
+                updated.update(update_payload)
                 if change_restart is not None:
                     updated["restart"] = {"strategy": change_restart.get("strategy")} if isinstance(change_restart, dict) else {}
                 compact = self._compact_container(updated, base_acs)

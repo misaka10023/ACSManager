@@ -19,7 +19,7 @@ containers:
   - name: "default"                       # 唯一标识 + 展示名称
     acs:
       container_name: "default"          # ACS 任务列表中的容器/任务名称
-      service_type: "container"          # container|notebook；notebook 优先走 /api/tasks + /instances/worker/0
+      service_type: "container"          # container|notebook；notebook 使用 /api/notebook/task 系列接口
     restart:
       strategy: "restart"                # restart|recreate
     ssh:

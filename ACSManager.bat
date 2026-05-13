@@ -1,1 +1,0 @@
-D:\Pe\Project\python\ACSManager\.venv\Scripts\python.exe main.py

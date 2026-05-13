@@ -621,7 +621,7 @@ window.ConfigWorkbench = (() => {
           '容器标识、ACS 任务名和重启策略。',
           [
             renderField({ label: '容器名称', tip: '本地唯一标识，同时用于 Web UI 展示和 manager 键。', control: inputControl('name', container.name, { placeholder: 'E2SRLF' }) }),
-            renderField({ label: '服务类型', tip: 'container 使用 instance-service；notebook 使用 /api/tasks。', control: inputControl('acs.service_type', container.acs.service_type, { type: 'select', choices: [{ value: 'container', label: 'container' }, { value: 'notebook', label: 'notebook' }] }) }),
+            renderField({ label: '服务类型', tip: 'container 使用 instance-service；notebook 使用 /api/notebook/task。', control: inputControl('acs.service_type', container.acs.service_type, { type: 'select', choices: [{ value: 'container', label: 'container' }, { value: 'notebook', label: 'notebook' }] }) }),
             renderField({ label: '重启策略', tip: 'restart 会尝试重启原任务；recreate 会创建新任务。', control: inputControl('restart.strategy', container.restart.strategy, { type: 'select', choices: [{ value: 'restart', label: 'restart' }, { value: 'recreate', label: 'recreate' }] }) }),
             renderField({ label: 'ACS 任务名称', tip: 'container 建议填实例名；notebook 可填基础名。', help: '下方列表来自 ACS 任务查询；选择后会自动填入此输入框。', control: inputControl('acs.container_name', container.acs.container_name, { placeholder: 'Notebook_2604107259' }), span: 2 }),
             renderField({ label: 'ACS 任务下拉', tip: '按当前服务类型和输入关键字过滤，可点击刷新重新拉取。', control: `<div class="stack-sm"><div class="inline-actions"><button type="button" class="btn btn-secondary btn-xxs" data-action="refresh-acs-tasks">刷新 ACS 列表</button></div><select class="input suggestion-select" size="6" data-action="pick-acs-task">${renderSuggestionOptions(container)}</select></div>`, span: 3 }),

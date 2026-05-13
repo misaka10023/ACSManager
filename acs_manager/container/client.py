@@ -208,11 +208,11 @@ class ContainerClient:
         *,
         keyword: str = "",
     ) -> Dict[str, Any]:
-        """获取 notebook/jupyter 任务列表：/api/tasks。"""
+        """List Notebook tasks from the ACS Notebook service."""
         params: Dict[str, Any] = {"start": start, "limit": limit, "sort": sort}
         if keyword:
-            params["keyWord"] = keyword
-        url = self._url_api("/api/tasks")
+            params["notebookName"] = keyword
+        url = self._url_api("/api/notebook/task")
         return self._request_json("get", url, params=params)
 
     def get_related_tasks(self, instance_service_id: str, start: int = 0, limit: int = 20, sort: str = "DESC") -> Dict[str, Any]:
@@ -262,6 +262,16 @@ class ContainerClient:
     ) -> Dict[str, Any]:
         """获取 notebook/jupyter 任务实例详情：/api/tasks/{id}/instances/{type}/{index}。"""
         url = self._url_api(f"/api/tasks/{task_id}/instances/{container_type}/{container_index}")
+        return self._request_json("get", url)
+
+    def get_notebook_record_detail(self, notebook_id: str) -> Dict[str, Any]:
+        """Get Notebook task detail from /api/notebook/{id}/detail."""
+        url = self._url_api(f"/api/notebook/{notebook_id}/detail")
+        return self._request_json("get", url)
+
+    def get_notebook_monitor(self, notebook_id: str) -> Dict[str, Any]:
+        """Get Notebook monitor data from /api/notebook/{id}/monitor."""
+        url = self._url_api(f"/api/notebook/{notebook_id}/monitor")
         return self._request_json("get", url)
 
     def _service_type(self, *, reload: bool = False) -> str:
@@ -403,18 +413,28 @@ class ContainerClient:
 
     def find_instance_by_name(self, name: str, *, start: int = 0, limit: int = 200) -> Optional[Dict[str, Any]]:
         service_type = self._service_type(reload=False)
-        sources: List[tuple[str, List[Dict[str, Any]], tuple[str, ...]]] = []
         if service_type == "notebook":
             try:
                 notebook_items = self._task_items(self.list_notebook_tasks(start=start, limit=limit))
             except Exception:
                 notebook_items = []
-            sources.append(("notebook", notebook_items, ("taskName", "name")))
+            sources = [("notebook", notebook_items, ("notebookName", "taskName", "name"))]
+            return self._match_instance_from_sources(name, sources)
+
         try:
             container_items = self._task_items(self.list_tasks(start=start, limit=limit))
         except Exception:
             container_items = []
-        sources.append(("container", container_items, ("instanceServiceName", "taskName", "notebookName", "name")))
+        sources = [("container", container_items, ("instanceServiceName", "taskName", "notebookName", "name"))]
+        return self._match_instance_from_sources(name, sources)
+
+    def find_notebook_task_by_name(self, name: str, *, start: int = 0, limit: int = 200) -> Optional[Dict[str, Any]]:
+        """Match only Notebook service records."""
+        try:
+            notebook_items = self._task_items(self.list_notebook_tasks(start=start, limit=limit, keyword=name))
+        except Exception:
+            notebook_items = []
+        sources = [("notebook", notebook_items, ("notebookName", "taskName", "name"))]
         return self._match_instance_from_sources(name, sources)
 
     def find_container_task_by_name(self, name: str, *, start: int = 0, limit: int = 200) -> Optional[Dict[str, Any]]:
@@ -446,7 +466,7 @@ class ContainerClient:
                         "name": name,
                         "status": item.get("status"),
                         "id": task_id or None,
-                        "task_type": item.get("taskType"),
+                        "task_type": item.get("taskType") or item.get("type"),
                         "service_type": service_type,
                         "createTime": item.get("createTime"),
                         "startTime": item.get("startTime"),
@@ -468,6 +488,7 @@ class ContainerClient:
             _append(
                 self._task_items(self.list_notebook_tasks(start=0, limit=limit, sort="DESC")),
                 "notebook",
+                "notebookName",
                 "taskName",
                 "name",
             )
@@ -476,10 +497,10 @@ class ContainerClient:
         suggestions.sort(key=self._parse_task_time, reverse=True)
         return suggestions
 
-    def _get_notebook_instance_info(self, task: Dict[str, Any], task_id: str) -> Dict[str, Any]:
+    def _get_notebook_instance_info(self, task: Dict[str, Any], notebook_id: str) -> Dict[str, Any]:
         detail_data: Optional[Dict[str, Any]] = None
         try:
-            detail = self.get_notebook_task_detail(task_id)
+            detail = self.get_notebook_record_detail(notebook_id)
             raw = detail.get("data") if isinstance(detail, dict) else None
             if isinstance(raw, dict) and raw:
                 detail_data = raw
@@ -488,25 +509,52 @@ class ContainerClient:
 
         source_task = detail_data or task
         info: Dict[str, Any] = {}
-        instance_data: Optional[Dict[str, Any]] = None
-        for container_type in ("worker", "ps"):
-            try:
-                instance = self.get_task_instance(task_id, container_type=container_type, container_index=0)
-            except Exception:
-                continue
-            raw = instance.get("data") if isinstance(instance, dict) else None
-            if isinstance(raw, dict) and raw:
-                instance_data = raw
-                info.update(raw)
-                info["containerType"] = raw.get("containerType") or container_type
-                break
 
-        for key in ("status", "taskStatus"):
-            if source_task.get(key):
-                info["status"] = source_task.get(key)
+        monitor_data: Optional[Dict[str, Any]] = None
+        try:
+            monitor = self.get_notebook_monitor(notebook_id)
+            raw = monitor.get("data") if isinstance(monitor, dict) else None
+            if isinstance(raw, dict) and raw:
+                monitor_data = raw
+                info.update(raw)
+        except Exception:
+            monitor_data = None
+
+        runtime_task_id = str(
+            source_task.get("instanceId")
+            or task.get("instanceId")
+            or ""
+        ).strip()
+        runtime_detail: Optional[Dict[str, Any]] = None
+        instance_data: Optional[Dict[str, Any]] = None
+        if runtime_task_id:
+            try:
+                runtime = self.get_notebook_task_detail(runtime_task_id)
+                raw = runtime.get("data") if isinstance(runtime, dict) else None
+                if isinstance(raw, dict) and raw:
+                    runtime_detail = raw
+            except Exception:
+                runtime_detail = None
+
+            for container_type in ("worker", "ps"):
+                try:
+                    instance = self.get_task_instance(runtime_task_id, container_type=container_type, container_index=0)
+                except Exception:
+                    continue
+                raw = instance.get("data") if isinstance(instance, dict) else None
+                if isinstance(raw, dict) and raw:
+                    instance_data = raw
+                    info.update(raw)
+                    info["containerType"] = raw.get("containerType") or container_type
+                    break
+
+        for source in (source_task, monitor_data or {}, runtime_detail or {}, instance_data or {}):
+            for key in ("status", "taskStatus"):
+                if source.get(key):
+                    info["status"] = source.get(key)
+                    break
+            if info.get("status"):
                 break
-        if instance_data and instance_data.get("status"):
-            info["status"] = instance_data.get("status")
 
         for key in ("startTime", "createTime"):
             if source_task.get(key):
@@ -520,34 +568,24 @@ class ContainerClient:
 
         candidate_ip = (
             self._extract_ip_candidate(instance_data)
+            or self._extract_ip_candidate(runtime_detail)
             or self._extract_ip_candidate(source_task)
             or self._extract_ip_candidate(task)
         )
         if candidate_ip:
             info["instanceIp"] = candidate_ip
-            info["ipSource"] = "api.tasks.instance"
+            info["ipSource"] = "api.notebook.runtime"
 
-        instance_service_id = (
-            source_task.get("instanceServiceId")
-            or task.get("instanceServiceId")
-        )
-        if instance_service_id:
-            info["instanceServiceId"] = instance_service_id
-        notebook_task_id = (
-            source_task.get("taskId")
-            or task.get("taskId")
-        )
-        if notebook_task_id:
-            info["taskId"] = notebook_task_id
-        notebook_record_id = (
-            source_task.get("id")
-            or task.get("id")
-            or task_id
-        )
-        if notebook_record_id:
-            info["id"] = notebook_record_id
-        if source_task.get("taskName"):
-            info["taskName"] = source_task.get("taskName")
+        info["id"] = source_task.get("id") or task.get("id") or notebook_id
+        if source_task.get("instanceId") or task.get("instanceId"):
+            info["instanceId"] = source_task.get("instanceId") or task.get("instanceId")
+        if runtime_detail and runtime_detail.get("taskId"):
+            info["taskId"] = runtime_detail.get("taskId")
+        elif source_task.get("taskId") or task.get("taskId"):
+            info["taskId"] = source_task.get("taskId") or task.get("taskId")
+        for key in ("notebookName", "taskName", "name"):
+            if source_task.get(key):
+                info[key] = source_task.get(key)
         return info
 
     def get_container_instance_info_by_name(self, name: str) -> Optional[Dict[str, Any]]:
@@ -577,9 +615,9 @@ class ContainerClient:
         service_type = self._service_type(reload=False)
 
         if service_type == "notebook":
-            # Notebook detail/instance endpoints expect the notebook record id
-            # returned by /api/tasks, not the numeric taskId field.
-            notebook_task_id = task.get("id") or task.get("taskId") or task.get("instanceServiceId")
+            # Notebook lifecycle endpoints use the record id returned by
+            # /api/notebook/task. Runtime instance probes use instanceId.
+            notebook_task_id = task.get("id")
             if not notebook_task_id:
                 return None
             return self._get_notebook_instance_info(task, str(notebook_task_id))
@@ -681,7 +719,33 @@ class ContainerClient:
         url = self._url_api("/api/instance-service/task/actions/restart")
         return self._request_json("post", url, json={"id": task_id})
 
+    def restart_notebook_task(
+        self,
+        notebook_id: str,
+        *,
+        auto_terminated: Any = None,
+        timeout_limit: Any = None,
+    ) -> Dict[str, Any]:
+        """Restart/start a Notebook task through the Notebook service."""
+        payload: Dict[str, Any] = {"id": notebook_id}
+        if auto_terminated is not None:
+            payload["autoTerminated"] = auto_terminated
+        if timeout_limit is not None:
+            payload["timeoutLimit"] = "" if timeout_limit == "unlimited" else timeout_limit
+        url = self._url_api("/api/notebook/task/actions/restart")
+        return self._request_json("post", url, json=payload)
+
+    def stop_notebook_tasks(self, notebook_ids: List[str]) -> Dict[str, Any]:
+        """Stop Notebook tasks through the Notebook service."""
+        url = self._url_api("/api/notebook/task/actions/stop")
+        return self._request_json("post", url, json={"ids": notebook_ids})
+
     def create_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """创建新任务 /api/instance-service/task。"""
         url = self._url_api("/api/instance-service/task")
+        return self._request_json("post", url, json=payload)
+
+    def create_notebook_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a Notebook task through /api/notebook/task."""
+        url = self._url_api("/api/notebook/task")
         return self._request_json("post", url, json=payload)

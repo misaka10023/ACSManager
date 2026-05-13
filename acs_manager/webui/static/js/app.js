@@ -507,7 +507,7 @@
         <label class="flex flex-col gap-1 text-xs text-slate-600">容器 SSH 端口<input type="number" class="input" data-field="container_port" value="${ssh.container_port ?? ''}"></label>
         <label class="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" class="checkbox" data-field="password_login" ${ssh.password_login ? 'checked' : ''}>密码登录</label>
         <label class="flex flex-col gap-1 text-xs text-slate-600">密码<input type="text" class="input" data-field="password" value="${ssh.password || ''}"></label>
-        <label class="flex flex-col gap-1 text-xs text-slate-600">容器 IP(兜底)<input type="text" class="input" data-field="container_ip" value="${ssh.container_ip || ''}"><span class="text-[11px] text-slate-400">自动解析失败时才需要手填；notebook 模式会优先走 /api/tasks/instances/worker/0。</span></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">容器 IP(兜底)<input type="text" class="input" data-field="container_ip" value="${ssh.container_ip || ''}"><span class="text-[11px] text-slate-400">自动解析失败时才需要手填；notebook 模式会优先走 /api/notebook/task 系列接口。</span></label>
       </div>
       <div class="space-y-2">
         <div class="flex items-center justify-between text-xs text-slate-600">
@@ -547,7 +547,7 @@
           <option value="container" ${serviceType === 'notebook' ? '' : 'selected'}>container</option>
           <option value="notebook" ${serviceType === 'notebook' ? 'selected' : ''}>notebook</option>
         </select>
-        <span class="text-[11px] text-slate-400">container 使用 instance-service；notebook 使用 /api/tasks。</span>
+        <span class="text-[11px] text-slate-400">container 使用 instance-service；notebook 使用 /api/notebook/task。</span>
       `;
       settingsGrid.insertBefore(serviceField, restartField);
     }
