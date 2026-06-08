@@ -62,6 +62,7 @@ class ContainerManager:
         self._stop_requested = False
         self._tunnel_started_once = False
         self._tunnel_failure_count = 0
+        self._tunnel_config_event = asyncio.Event()
         self._task_exec_lock = asyncio.Lock()
 
     @staticmethod
@@ -1141,6 +1142,16 @@ class ContainerManager:
             return base
         return ["ssh", "-o", "ExitOnForwardFailure=yes", "-N"] + base[1:]
 
+    def _has_tunnel_forwards(self, ssh_cfg: Dict[str, Any]) -> bool:
+        """Return true only when an SSH tunnel has explicit forwarding work."""
+        if self._forward_ports(ssh_cfg):
+            return True
+        if self._reverse_specs(ssh_cfg):
+            return True
+        if self._remote_dynamic_specs(ssh_cfg):
+            return True
+        return False
+
     def _forward_ports(self, ssh_cfg: Dict[str, Any]) -> List[int]:
         """收集需要本地监听的端口（仅 -L 正向转发）。"""
         ports: List[int] = []
@@ -1407,6 +1418,10 @@ done
                 return
             try:
                 ssh_cfg = self._ssh_cfg(reload=True)
+                if not self._has_tunnel_forwards(ssh_cfg):
+                    self.state["tunnel_status"] = "disabled"
+                    logger.info("No SSH forwards configured for container %s; skip tunnel start.", self.container_id)
+                    return
                 target_ip = self.state.get("container_ip") or ssh_cfg.get("container_ip")
                 if not target_ip:
                     try:
@@ -1466,10 +1481,17 @@ done
         """重启隧道刷新转发与端口。"""
         await self.stop_tunnel()
         await self.start_tunnel()
+        self._tunnel_config_event.set()
 
     async def maintain_tunnel(self) -> None:
         """保持隧道存活，异常退出后自动重启。"""
         while not self._stop_requested:
+            if not self._has_tunnel_forwards(self._ssh_cfg(reload=True)):
+                self.state["tunnel_status"] = "disabled"
+                logger.info("No SSH forwards configured for container %s; tunnel maintenance disabled.", self.container_id)
+                await self._tunnel_config_event.wait()
+                self._tunnel_config_event.clear()
+                continue
             await self.start_tunnel()
             proc = self._tunnel_process
             if proc is None:
@@ -1526,6 +1548,7 @@ done
     async def shutdown(self) -> None:
         """通知循环退出并关闭隧道。"""
         self._stop_requested = True
+        self._tunnel_config_event.set()
         await self.stop_tunnel()
 
     def snapshot(self) -> Dict[str, Any]:
