@@ -75,6 +75,36 @@ window.ConfigWorkbench = (() => {
     return Number.isFinite(num) ? num : null;
   }
 
+  function normalizeRemoteDynamicForward(item) {
+    if (typeof item === 'number') {
+      return { bind: '127.0.0.1', remote: item, mid: null };
+    }
+    if (typeof item === 'string') {
+      const parts = item.split(':');
+      if (parts.length === 1) {
+        return { bind: '127.0.0.1', remote: toNumberOrNull(parts[0]), mid: null };
+      }
+      if (parts.length === 2 && /^\d+$/.test(parts[0])) {
+        return { bind: '127.0.0.1', remote: toNumberOrNull(parts[0]), mid: toNumberOrNull(parts[1]) };
+      }
+      if (parts.length === 2) {
+        return { bind: parts[0] || '127.0.0.1', remote: toNumberOrNull(parts[1]), mid: null };
+      }
+      if (parts.length === 3) {
+        return { bind: parts[0] || '127.0.0.1', remote: toNumberOrNull(parts[1]), mid: toNumberOrNull(parts[2]) };
+      }
+      return null;
+    }
+    if (item && typeof item === 'object') {
+      return {
+        bind: String(item.bind || '127.0.0.1'),
+        remote: toNumberOrNull(item.remote ?? item.port),
+        mid: toNumberOrNull(item.mid ?? item.intermediate),
+      };
+    }
+    return null;
+  }
+
   function nowLabel() {
     return new Date().toLocaleString('zh-CN', { hour12: false });
   }
@@ -153,6 +183,7 @@ window.ConfigWorkbench = (() => {
         container_port: 22,
         password_login: false,
         password: '',
+        remote_dynamic_forwards: [],
         forwards: [],
         reverse_forwards: [],
         container_ip: '',
@@ -172,6 +203,11 @@ window.ConfigWorkbench = (() => {
           .map((item) => ({ local: toNumberOrNull(item?.local), remote: toNumberOrNull(item?.remote) }))
           .filter((item) => item.local != null && item.remote != null)
       : [];
+    const remoteDynamicForwards = Array.isArray(ssh.remote_dynamic_forwards)
+      ? ssh.remote_dynamic_forwards
+          .map((item) => normalizeRemoteDynamicForward(item))
+          .filter((item) => item && item.remote != null)
+      : [];
     const reverseForwards = Array.isArray(ssh.reverse_forwards)
       ? ssh.reverse_forwards
           .map((item) => ({ local: toNumberOrNull(item?.local), remote: toNumberOrNull(item?.remote), mid: toNumberOrNull(item?.mid) }))
@@ -186,7 +222,9 @@ window.ConfigWorkbench = (() => {
         service_type: String(acs.service_type || 'container').toLowerCase() === 'notebook' ? 'notebook' : 'container',
       },
       restart: {
-        strategy: restart.strategy === 'recreate' ? 'recreate' : 'restart',
+        strategy: ['restart', 'recreate', 'none'].includes(String(restart.strategy || '').toLowerCase())
+          ? String(restart.strategy).toLowerCase()
+          : 'restart',
       },
       ssh: {
         mode: ['direct', 'jump', 'double'].includes(String(ssh.mode || 'jump')) ? String(ssh.mode || 'jump') : 'jump',
@@ -197,6 +235,7 @@ window.ConfigWorkbench = (() => {
         container_port: toNumberOrNull(ssh.container_port) ?? 22,
         password_login: Boolean(ssh.password_login),
         password: String(ssh.password || ''),
+        remote_dynamic_forwards: remoteDynamicForwards,
         forwards,
         reverse_forwards: reverseForwards,
         container_ip: String(ssh.container_ip || ''),
@@ -499,6 +538,29 @@ window.ConfigWorkbench = (() => {
       .join('');
   }
 
+  function renderRemoteDynamicRows(rows) {
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length) {
+      return `
+        <tr class="table-muted-row">
+          <td colspan="4">
+            <div class="empty-inline">暂无 SOCKS 代理，点击右上角新增。</div>
+          </td>
+        </tr>
+      `;
+    }
+    return list
+      .map((row, index) => `
+        <tr>
+          <td><input type="text" class="input input-sm" data-collection="remote_dynamic_forwards" data-index="${index}" data-key="bind" value="${escapeHtml(row.bind || '127.0.0.1')}" placeholder="127.0.0.1"></td>
+          <td><input type="number" class="input input-sm" data-collection="remote_dynamic_forwards" data-index="${index}" data-key="remote" value="${row.remote ?? ''}" placeholder="17890"></td>
+          <td><input type="number" class="input input-sm" data-collection="remote_dynamic_forwards" data-index="${index}" data-key="mid" value="${row.mid ?? ''}" placeholder="double 模式填写"></td>
+          <td class="table-action-cell"><button type="button" class="btn btn-secondary btn-xxs" data-action="remove-dynamic" data-index="${index}">删除</button></td>
+        </tr>
+      `)
+      .join('');
+  }
+
   function renderTaskList(containerId, tasks) {
     const runtimeTasks = state.runtimeById[containerId]?.tasks || [];
     const runtimeByTaskId = Object.fromEntries((Array.isArray(runtimeTasks) ? runtimeTasks : []).map((task) => [task.id, task]));
@@ -622,7 +684,7 @@ window.ConfigWorkbench = (() => {
           [
             renderField({ label: '容器名称', tip: '本地唯一标识，同时用于 Web UI 展示和 manager 键。', control: inputControl('name', container.name, { placeholder: 'E2SRLF' }) }),
             renderField({ label: '服务类型', tip: 'container 使用 instance-service；notebook 使用 /api/notebook/task。', control: inputControl('acs.service_type', container.acs.service_type, { type: 'select', choices: [{ value: 'container', label: 'container' }, { value: 'notebook', label: 'notebook' }] }) }),
-            renderField({ label: '重启策略', tip: 'restart 会尝试重启原任务；recreate 会创建新任务。', control: inputControl('restart.strategy', container.restart.strategy, { type: 'select', choices: [{ value: 'restart', label: 'restart' }, { value: 'recreate', label: 'recreate' }] }) }),
+            renderField({ label: '重启策略', tip: 'restart 会尝试重启原任务；recreate 会创建新任务；none 不自动重启或重建。', control: inputControl('restart.strategy', container.restart.strategy, { type: 'select', choices: [{ value: 'restart', label: 'restart' }, { value: 'recreate', label: 'recreate' }, { value: 'none', label: 'none / 不重启' }] }) }),
             renderField({ label: 'ACS 任务名称', tip: 'container 建议填实例名；notebook 可填基础名。', help: '下方列表来自 ACS 任务查询；选择后会自动填入此输入框。', control: inputControl('acs.container_name', container.acs.container_name, { placeholder: 'Notebook_2604107259' }), span: 2 }),
             renderField({ label: 'ACS 任务下拉', tip: '按当前服务类型和输入关键字过滤，可点击刷新重新拉取。', control: `<div class="stack-sm"><div class="inline-actions"><button type="button" class="btn btn-secondary btn-xxs" data-action="refresh-acs-tasks">刷新 ACS 列表</button></div><select class="input suggestion-select" size="6" data-action="pick-acs-task">${renderSuggestionOptions(container)}</select></div>`, span: 3 }),
           ].join('')
@@ -643,6 +705,17 @@ window.ConfigWorkbench = (() => {
             renderField({ label: '容器兜底 IP', tip: '自动解析失败时才会用到；后续刷新出新 IP 后会自动写回。', control: inputControl('ssh.container_ip', container.ssh.container_ip, { placeholder: '173.0.106.8' }) }),
           ].join('')
         )}
+
+        <section class="card config-panel">
+          <div class="config-section-header">
+            <div>
+              <div class="config-section-title">远端 SOCKS 代理 (-R dynamic)</div>
+              <div class="config-section-copy">在容器侧监听 SOCKS4/5 端口，例如 127.0.0.1:17890；容器程序需显式设置 ALL_PROXY。</div>
+            </div>
+            <button type="button" class="btn btn-secondary btn-xxs" data-action="add-dynamic">新增代理</button>
+          </div>
+          <div class="forward-table-wrap"><table class="forward-table"><thead><tr><th>监听地址</th><th>SOCKS 端口</th><th>中间端口</th><th class="table-action-cell">操作</th></tr></thead><tbody>${renderRemoteDynamicRows(container.ssh.remote_dynamic_forwards)}</tbody></table></div>
+        </section>
 
         <section class="card config-panel">
           <div class="config-section-header">
@@ -1140,23 +1213,30 @@ window.ConfigWorkbench = (() => {
 
   function mutateForward(kind, index, key, value) {
     touchContainerDraft((draft) => {
-      const list = kind === 'reverse_forwards' ? draft.ssh.reverse_forwards : draft.ssh.forwards;
+      const list = kind === 'remote_dynamic_forwards'
+        ? draft.ssh.remote_dynamic_forwards
+        : (kind === 'reverse_forwards' ? draft.ssh.reverse_forwards : draft.ssh.forwards);
       if (!Array.isArray(list) || !list[index]) return;
-      list[index][key] = toNumberOrNull(value);
+      list[index][key] = key === 'bind' ? String(value || '').trim() : toNumberOrNull(value);
     });
   }
 
   function addForward(kind) {
     touchContainerDraft((draft) => {
-      const list = kind === 'reverse_forwards' ? draft.ssh.reverse_forwards : draft.ssh.forwards;
-      list.push(kind === 'reverse_forwards' ? { local: null, remote: null, mid: null } : { local: null, remote: null });
+      const list = kind === 'remote_dynamic_forwards'
+        ? draft.ssh.remote_dynamic_forwards
+        : (kind === 'reverse_forwards' ? draft.ssh.reverse_forwards : draft.ssh.forwards);
+      if (kind === 'remote_dynamic_forwards') list.push({ bind: '127.0.0.1', remote: null, mid: null });
+      else list.push(kind === 'reverse_forwards' ? { local: null, remote: null, mid: null } : { local: null, remote: null });
     });
     renderAll();
   }
 
   function removeForward(kind, index) {
     touchContainerDraft((draft) => {
-      const list = kind === 'reverse_forwards' ? draft.ssh.reverse_forwards : draft.ssh.forwards;
+      const list = kind === 'remote_dynamic_forwards'
+        ? draft.ssh.remote_dynamic_forwards
+        : (kind === 'reverse_forwards' ? draft.ssh.reverse_forwards : draft.ssh.forwards);
       if (Array.isArray(list)) list.splice(index, 1);
     });
     renderAll();
@@ -1235,8 +1315,10 @@ window.ConfigWorkbench = (() => {
     if (!button) return;
     const action = button.getAttribute('data-action');
     if (action === 'refresh-acs-tasks') return refreshTaskSuggestions(true);
+    if (action === 'add-dynamic') return addForward('remote_dynamic_forwards');
     if (action === 'add-forward') return addForward('forwards');
     if (action === 'add-reverse') return addForward('reverse_forwards');
+    if (action === 'remove-dynamic') return removeForward('remote_dynamic_forwards', Number(button.getAttribute('data-index')));
     if (action === 'remove-forward') return removeForward('forwards', Number(button.getAttribute('data-index')));
     if (action === 'remove-reverse') return removeForward('reverse_forwards', Number(button.getAttribute('data-index')));
     if (action === 'add-task') return addTask();

@@ -384,6 +384,7 @@ def _default_container_editor(name: str) -> Dict[str, Any]:
             "container_port": 22,
             "password_login": False,
             "password": "",
+            "remote_dynamic_forwards": [],
             "forwards": [],
             "reverse_forwards": [],
             "container_ip": "",
@@ -419,6 +420,8 @@ def _normalize_container_editor(container: Any, idx: int = 0) -> Dict[str, Any]:
     for key, value in editor["ssh"].items():
         if key not in ssh_clean:
             ssh_clean[key] = copy.deepcopy(value)
+    if not isinstance(ssh_clean.get("remote_dynamic_forwards"), list):
+        ssh_clean["remote_dynamic_forwards"] = []
     if not isinstance(ssh_clean.get("forwards"), list):
         ssh_clean["forwards"] = []
     if not isinstance(ssh_clean.get("reverse_forwards"), list):
@@ -430,7 +433,7 @@ def _normalize_container_editor(container: Any, idx: int = 0) -> Dict[str, Any]:
 
     restart_raw = raw.get("restart", {}) if isinstance(raw.get("restart"), dict) else {}
     strategy = str(restart_raw.get("strategy") or "restart").strip().lower()
-    if strategy not in {"restart", "recreate"}:
+    if strategy not in {"restart", "recreate", "none"}:
         strategy = "restart"
     editor["restart"] = {"strategy": strategy}
     return editor
@@ -630,13 +633,27 @@ def refresh_ip(container_id: str, user: str = Depends(require_auth)) -> dict:
 @app.post("/containers/{container_id}/restart-container")
 async def restart_container_api(container_id: str, user: str = Depends(require_auth)) -> dict:
     if multi_manager:
-        await multi_manager.restart_container(container_id)
+        result = await multi_manager.restart_container(container_id)
     else:
         mgr = _resolve_manager(container_id)
         if mgr is None:
             raise HTTPException(status_code=404, detail="Container not found")
-        await mgr.restart_container()
-    return {"status": "container_restarting"}
+        result = await mgr.restart_container()
+    status_map = {
+        "recreated": "container_recreating",
+        "restarted": "container_restarting",
+        "skipped": "container_restart_skipped",
+    }
+    message_map = {
+        "recreated": "已按策略创建新任务",
+        "restarted": "已按策略提交重启请求",
+        "skipped": "重启策略为 none，已跳过重启/重建",
+    }
+    return {
+        "status": status_map.get(result, "container_restart_failed"),
+        "result": result,
+        "message": message_map.get(result, "重启/重建失败，请查看日志"),
+    }
 
 
 @app.post("/containers/{container_id}/tasks/{task_id}/run")
@@ -844,6 +861,7 @@ def _critical_snapshot(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "ssh.container_port": ssh.get("container_port"),
         "ssh.local_open_port": ssh.get("local_open_port"),
         "ssh.container_open_port": ssh.get("container_open_port"),
+        "ssh.remote_dynamic_forwards": ssh.get("remote_dynamic_forwards"),
         "ssh.forwards": ssh.get("forwards"),
         "ssh.reverse_forwards": ssh.get("reverse_forwards"),
         "ssh.intermediate_port": ssh.get("intermediate_port"),
@@ -875,6 +893,7 @@ def _container_critical_map(cfg: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
                 "ssh.container_port": ssh_cfg.get("container_port"),
                 "ssh.password_login": ssh_cfg.get("password_login"),
                 "ssh.password": ssh_cfg.get("password"),
+                "ssh.remote_dynamic_forwards": ssh_cfg.get("remote_dynamic_forwards"),
                 "ssh.forwards": ssh_cfg.get("forwards"),
                 "ssh.reverse_forwards": ssh_cfg.get("reverse_forwards"),
                 "ssh.container_ip": ssh_cfg.get("container_ip"),
@@ -894,6 +913,7 @@ def _container_critical_map(cfg: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         "ssh.container_port": ssh_cfg.get("container_port"),
         "ssh.password_login": ssh_cfg.get("password_login"),
         "ssh.password": ssh_cfg.get("password"),
+        "ssh.remote_dynamic_forwards": ssh_cfg.get("remote_dynamic_forwards"),
         "ssh.forwards": ssh_cfg.get("forwards"),
         "ssh.reverse_forwards": ssh_cfg.get("reverse_forwards"),
         "ssh.container_ip": ssh_cfg.get("container_ip"),

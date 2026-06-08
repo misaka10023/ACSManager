@@ -79,13 +79,16 @@ copy config\examples\settings.example.yaml config\local\settings.yaml
 
 - `restart`：只重启原任务。
 - `recreate`：只新建任务，名称格式为 `容器名称_次数_时间戳`。
-- 两种策略严格区分，失败时不会自动切换到另一种策略。
+- `none`：不自动重启或重建，手动“重启容器”操作也会跳过。
+- 三种策略严格区分，失败时不会自动切换到另一种策略。
 
 端口转发：
 
 - `forwards` 对应 SSH `-L`。
+- `remote_dynamic_forwards` 对应 OpenSSH 远端动态转发 `-R [bind:]port`，用于在容器侧监听 SOCKS4/5 代理端口。例如 `{"bind":"127.0.0.1","remote":17890}` 会生成 `-R 127.0.0.1:17890`。
 - `reverse_forwards` 对应 SSH `-R`。
 - 只有配置了对应列表才会拼接对应参数。
+- 容器程序需要显式使用 SOCKS 代理，例如 `ALL_PROXY=socks5h://127.0.0.1:17890`；不会自动透明代理所有网络。
 
 容器任务：
 
@@ -116,7 +119,7 @@ copy config\examples\settings.example.yaml config\local\settings.yaml
 - `POST /config/containers/{id}/clone`：复制容器。
 - `POST /config/containers/reorder`：调整容器顺序。
 - `POST /containers/{id}/refresh-ip`：刷新容器 IP。
-- `POST /containers/{id}/restart-container`：按策略重启或重建容器。
+- `POST /containers/{id}/restart-container`：按策略重启、重建或跳过容器操作。
 - `POST /containers/{id}/tasks/{task_id}/run`：手动执行容器任务。
 - `GET /logs?lines=N`：读取最近 N 行日志。
 - `POST /update`：检查 Git 更新，存在新版本时拉取并重启。

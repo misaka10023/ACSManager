@@ -293,6 +293,12 @@
     return el.value;
   }
 
+  function toNumberOrNull(value) {
+    if (value === '' || value == null) return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  }
+
   function parseForwardLines(text) {
     if (!text) return [];
     return text
@@ -350,6 +356,28 @@
       .join('\n');
   }
 
+  function normalizeRemoteDynamicForward(item) {
+    if (typeof item === 'number') {
+      return { bind: '127.0.0.1', remote: item, mid: null };
+    }
+    if (typeof item === 'string') {
+      const parts = item.split(':');
+      if (parts.length === 1) return { bind: '127.0.0.1', remote: toNumberOrNull(parts[0]), mid: null };
+      if (parts.length === 2 && /^\d+$/.test(parts[0])) return { bind: '127.0.0.1', remote: toNumberOrNull(parts[0]), mid: toNumberOrNull(parts[1]) };
+      if (parts.length === 2) return { bind: parts[0] || '127.0.0.1', remote: toNumberOrNull(parts[1]), mid: null };
+      if (parts.length === 3) return { bind: parts[0] || '127.0.0.1', remote: toNumberOrNull(parts[1]), mid: toNumberOrNull(parts[2]) };
+      return null;
+    }
+    if (item && typeof item === 'object') {
+      return {
+        bind: String(item.bind || '127.0.0.1'),
+        remote: toNumberOrNull(item.remote ?? item.port),
+        mid: toNumberOrNull(item.mid ?? item.intermediate),
+      };
+    }
+    return null;
+  }
+
   function renderForwardRow(type, values = {}) {
     const row = document.createElement('div');
     row.className = 'grid grid-cols-3 gap-2 items-center text-xs border rounded p-2 bg-slate-100';
@@ -385,9 +413,37 @@
     return row;
   }
 
+  function renderRemoteDynamicRow(values = {}) {
+    const row = document.createElement('div');
+    row.className = 'grid grid-cols-4 gap-2 items-center text-xs border rounded p-2 bg-slate-100';
+    row.dataset.kind = 'dynamic';
+    row.innerHTML = `
+      <label class="flex flex-col gap-1 text-[11px]">
+        <span>监听地址</span>
+        <input type="text" class="input input-xs" data-field="bind" value="${values.bind || '127.0.0.1'}">
+      </label>
+      <label class="flex flex-col gap-1 text-[11px]">
+        <span>SOCKS 端口</span>
+        <input type="number" class="input input-xs" data-field="remote" value="${values.remote ?? ''}">
+      </label>
+      <label class="flex flex-col gap-1 text-[11px]">
+        <span>中间端口</span>
+        <input type="number" class="input input-xs" data-field="mid" value="${values.mid ?? ''}">
+      </label>
+      <div class="flex items-center justify-end">
+        <button type="button" class="btn btn-danger btn-xxs" data-action="remove-row">删除</button>
+      </div>
+    `;
+    return row;
+  }
+
   function appendForwardRow(listEl, type, values = {}) {
     const row = renderForwardRow(type, values);
     listEl.appendChild(row);
+  }
+
+  function appendRemoteDynamicRow(listEl, values = {}) {
+    listEl.appendChild(renderRemoteDynamicRow(values));
   }
 
   function slugifyTaskId(value, fallback) {
@@ -489,8 +545,9 @@
         </label>
         <label class="flex flex-col gap-1 text-xs text-slate-600">重启策略
           <select class="input" data-field="restart_strategy">
-            <option value="restart" ${restart.strategy === 'recreate' ? '' : 'selected'}>restart</option>
+            <option value="restart" ${restart.strategy === 'recreate' || restart.strategy === 'none' ? '' : 'selected'}>restart</option>
             <option value="recreate" ${restart.strategy === 'recreate' ? 'selected' : ''}>recreate</option>
+            <option value="none" ${restart.strategy === 'none' ? 'selected' : ''}>none / 不重启</option>
           </select>
         </label>
         <label class="flex flex-col gap-1 text-xs text-slate-600">SSH 模式
@@ -508,6 +565,16 @@
         <label class="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" class="checkbox" data-field="password_login" ${ssh.password_login ? 'checked' : ''}>密码登录</label>
         <label class="flex flex-col gap-1 text-xs text-slate-600">密码<input type="text" class="input" data-field="password" value="${ssh.password || ''}"></label>
         <label class="flex flex-col gap-1 text-xs text-slate-600">容器 IP(兜底)<input type="text" class="input" data-field="container_ip" value="${ssh.container_ip || ''}"><span class="text-[11px] text-slate-400">自动解析失败时才需要手填；notebook 模式会优先走 /api/notebook/task 系列接口。</span></label>
+      </div>
+      <div class="space-y-2">
+        <div class="flex items-center justify-between text-xs text-slate-600">
+          <div>
+            <div class="font-semibold">远端 SOCKS 代理 (-R dynamic)</div>
+            <div class="text-[11px] text-slate-400">容器侧监听 SOCKS 端口，例如 127.0.0.1:17890。</div>
+          </div>
+          <button type="button" class="px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white/80 text-slate-800 hover:border-indigo-200 hover:text-indigo-700 transition duration-150" data-action="add-dynamic">新增</button>
+        </div>
+        <div class="space-y-2" data-list="remote_dynamic_forwards"></div>
       </div>
       <div class="space-y-2">
         <div class="flex items-center justify-between text-xs text-slate-600">
@@ -554,7 +621,10 @@
 
     const fList = card.querySelector('[data-list="forwards"]');
     const rList = card.querySelector('[data-list="reverse_forwards"]');
+    const dList = card.querySelector('[data-list="remote_dynamic_forwards"]');
     const tList = card.querySelector('[data-list="tasks"]');
+    const dynamicData = Array.isArray(ssh.remote_dynamic_forwards) && ssh.remote_dynamic_forwards.length ? ssh.remote_dynamic_forwards : [{ bind: '127.0.0.1', remote: '', mid: '' }];
+    dynamicData.map(normalizeRemoteDynamicForward).filter(Boolean).forEach((f) => appendRemoteDynamicRow(dList, f));
     const forwardData = Array.isArray(ssh.forwards) && ssh.forwards.length ? ssh.forwards : [{ local: '', remote: '' }];
     forwardData.forEach((f) => appendForwardRow(fList, 'forward', f));
     const reverseData = Array.isArray(ssh.reverse_forwards) && ssh.reverse_forwards.length ? ssh.reverse_forwards : [{ local: '', remote: '', mid: '' }];
@@ -615,6 +685,19 @@
       const serviceType = get('select[data-field="service_type"]') || 'container';
       const restartStrategy = get('select[data-field="restart_strategy"]') || 'restart';
       const forwards = [];
+      const remoteDynamicForwards = [];
+      const dList = card.querySelector('[data-list="remote_dynamic_forwards"]');
+      if (dList) {
+        dList.querySelectorAll('[data-kind="dynamic"]').forEach((row) => {
+          const bind = String(row.querySelector('input[data-field="bind"]')?.value || '127.0.0.1').trim() || '127.0.0.1';
+          const remote = Number(row.querySelector('input[data-field="remote"]')?.value || '');
+          const midRaw = row.querySelector('input[data-field="mid"]')?.value || '';
+          const mid = midRaw === '' ? null : Number(midRaw);
+          if (!Number.isNaN(remote)) {
+            remoteDynamicForwards.push({ bind, remote, mid: Number.isNaN(mid) ? null : mid });
+          }
+        });
+      }
       const fList = card.querySelector('[data-list="forwards"]');
       if (fList) {
         fList.querySelectorAll('[data-kind="forward"]').forEach((row) => {
@@ -658,6 +741,7 @@
           container_port: containerPort || undefined,
           password_login: Boolean(get('input[data-field="password_login"]')),
           password: get('input[data-field="password"]'),
+          remote_dynamic_forwards: remoteDynamicForwards,
           forwards,
           reverse_forwards: reverseForwards,
           container_ip: get('input[data-field="container_ip"]').trim(),
@@ -682,6 +766,10 @@
       if (action === 'add-forward') {
         const list = card.querySelector('[data-list="forwards"]');
         if (list) appendForwardRow(list, 'forward', { local: '', remote: '' });
+      }
+      if (action === 'add-dynamic') {
+        const list = card.querySelector('[data-list="remote_dynamic_forwards"]');
+        if (list) appendRemoteDynamicRow(list, { bind: '127.0.0.1', remote: '', mid: '' });
       }
       if (action === 'add-reverse') {
         const list = card.querySelector('[data-list="reverse_forwards"]');

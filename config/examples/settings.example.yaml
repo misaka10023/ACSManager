@@ -21,7 +21,7 @@ containers:
       container_name: "default"          # ACS 任务列表中的容器/任务名称
       service_type: "container"          # container|notebook；notebook 使用 /api/notebook/task 系列接口
     restart:
-      strategy: "restart"                # restart|recreate
+      strategy: "restart"                # restart|recreate|none
     ssh:
       mode: "jump"                       # direct|jump|double SSH 模式
       bastion_host: ""                   # 跳板/远端服务 IP（direct 可留空）
@@ -31,6 +31,7 @@ containers:
       container_port: 22                 # 内层 SSH 端口（double 模式使用）
       password_login: false              # true 使用密码，false 使用密钥
       password: ""                       # 密码登录的密码
+      remote_dynamic_forwards: []        # 远端动态 SOCKS (-R)，如 {"bind":"127.0.0.1","remote":17890}
       forwards: []                       # 正向转发列表 (-L)，如 {"local": 8080, "remote": 80}
       reverse_forwards: []               # 反向转发列表 (-R)，支持 {"local":8080,"remote":80,"mid":58080}
       container_ip: ""                   # 可选兜底 IP；自动解析失败时可先手填，后续新 IP 会写回
@@ -52,6 +53,7 @@ containers:
 #      container_port: 22
 #      password_login: false
 #      password: ""
+#      remote_dynamic_forwards: []
 #      forwards: []
 #      reverse_forwards: []
 #      container_ip: ""

@@ -255,11 +255,11 @@ class MultiContainerManager:
             raise ValueError(f"Container {container_id} not found")
         await manager.stop_tunnel()
 
-    async def restart_container(self, container_id: str) -> None:
+    async def restart_container(self, container_id: str) -> str:
         manager = self.get_manager(container_id)
         if not manager:
             raise ValueError(f"Container {container_id} not found")
-        await manager.restart_container()
+        return await manager.restart_container()
 
     def resolve_container_ip(self, container_id: str, *, force_login: bool = True) -> Optional[str]:
         manager = self.get_manager(container_id)

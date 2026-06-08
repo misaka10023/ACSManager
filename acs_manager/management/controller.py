@@ -497,12 +497,17 @@ class ContainerManager:
         info: Optional[Dict[str, Any]] = None,
         *,
         name_hint: Optional[str] = None,
-    ) -> None:
+    ) -> str:
         """调用 ACS 重启接口。"""
         name = str(name_hint or self.configured_container_name(reload=True) or "").strip()
         if not name:
             logger.error("acs.container_name not configured or placeholder; cannot restart.")
-            return
+            return "error"
+
+        restart_cfg = self._restart_cfg(reload=True)
+        if restart_cfg.get("strategy") == "none":
+            logger.info("Restart strategy is none; skip restarting or recreating container %s.", name)
+            return "skipped"
 
         service_type = str(self._acs_cfg(reload=True).get("service_type") or "container").strip().lower()
         try:
@@ -511,7 +516,6 @@ class ContainerManager:
             logger.error("Failed to query container %s; cannot restart: %s", name, exc)
             task = None
 
-        restart_cfg = self._restart_cfg(reload=True)
         restart_target = task or info
         recreate_target = task or info
 
@@ -523,18 +527,18 @@ class ContainerManager:
             else:
                 created = self._recreate_container_task(base_name, recreate_target or {})
             if created:
-                return
+                return "recreated"
             logger.error("Recreate task failed; not falling back to restart original task.")
-            return
+            return "error"
 
         if service_type == "notebook":
             if not isinstance(restart_target, dict):
                 logger.error("Notebook %s not found; cannot restart.", name)
-                return
+                return "error"
             notebook_id = str(restart_target.get("id") or "").strip()
             if not notebook_id:
                 logger.error("Notebook %s is missing notebook record id; cannot restart.", name)
-                return
+                return "error"
             timeout_limit = restart_target.get("timeoutLimit")
             auto_terminated = restart_target.get("autoTerminated")
             if auto_terminated is None:
@@ -548,13 +552,13 @@ class ContainerManager:
                 )
             except Exception as exc:
                 logger.error("Notebook restart API call failed: %s", exc)
-                return
+                return "error"
             if str(resp.get("code")) == "0":
                 logger.info("Notebook restart request accepted: %s", resp)
                 self.state["last_restart"] = dt.datetime.now()
-                return
+                return "restarted"
             logger.error("Notebook restart request failed: %s", resp)
-            return
+            return "error"
 
         restart_ids = self._collect_restart_ids(restart_target, info, task)
         last_resp: Optional[Dict[str, Any]] = None
@@ -565,20 +569,21 @@ class ContainerManager:
                     resp = self.container_client.restart_task(task_id)
                 except Exception as exc:
                     logger.error("Restart API call failed: %s", exc)
-                    return
+                    return "error"
                 if str(resp.get("code")) == "0":
                     logger.info("Restart request accepted: %s", resp)
                     self.state["last_restart"] = dt.datetime.now()
-                    return
+                    return "restarted"
                 last_resp = resp
                 if not self._restart_response_not_found(resp):
                     logger.error("Restart request failed: %s", resp)
-                    return
+                    return "error"
 
         if last_resp is not None:
             logger.error("Restart request failed: %s", last_resp)
         else:
             logger.error("Container %s not found or missing usable restart identifiers; cannot restart.", name)
+        return "error"
 
     @staticmethod
     def _trim_task_output(value: str, limit: int = 1200) -> str:
@@ -1007,8 +1012,11 @@ class ContainerManager:
                         await self._maybe_run_auto_tasks(info)
 
                     if status_norm in stop_statuses:
-                        logger.warning("Container %s status is %s; triggering restart.", name, status)
-                        await self.restart_container(info=info, name_hint=name)
+                        result = await self.restart_container(info=info, name_hint=name)
+                        if result == "skipped":
+                            logger.info("Container %s status is %s; restart strategy is none, skip restart.", name, status)
+                        else:
+                            logger.warning("Container %s status is %s; restart result=%s.", name, status, result)
                         interval = fast_interval
                 else:
                     logger.warning("Container %s not found; will retry soon.", name)
@@ -1052,6 +1060,18 @@ class ContainerManager:
             if port_value:
                 base.extend(["-p", str(port_value)])
 
+        def dynamic_remote_arg(spec: Dict[str, Any], port_key: str = "remote") -> str:
+            bind = str(spec.get("bind") or "").strip()
+            port = spec.get(port_key)
+            return f"{bind}:{port}" if bind else str(port)
+
+        def remote_tcp_arg(spec: Dict[str, Any], remote_key: str, host: str, host_port_key: str) -> str:
+            bind = str(spec.get("bind") or "").strip()
+            remote = spec.get(remote_key)
+            host_port = spec.get(host_port_key)
+            suffix = f"{remote}:{host}:{host_port}"
+            return f"{bind}:{suffix}" if bind else suffix
+
         known_hosts = "NUL" if os.name == "nt" else "/dev/null"
         keepalive = [
             "-o",
@@ -1072,19 +1092,26 @@ class ContainerManager:
             if not bastion_host:
                 raise ValueError("double mode requires ssh.bastion_host or ssh.remote_server_ip")
             revs = self._reverse_specs(ssh_cfg)
+            dynamic_revs = self._remote_dynamic_specs(ssh_cfg)
             if revs and any(spec.get("mid") is None for spec in revs):
                 raise ValueError("double mode reverse forwarding needs mid (intermediate port) in reverse_forwards")
+            if dynamic_revs and any(spec.get("mid") is None for spec in dynamic_revs):
+                raise ValueError("double mode remote dynamic forwarding needs mid (intermediate port) in remote_dynamic_forwards")
 
             outer: List[str] = ["ssh", "-T"] + keepalive
             add_port(outer, ssh_port)
             add_forwards(outer)
             for spec in revs:
                 outer.extend(["-R", f"{spec['mid']}:localhost:{spec['local']}"])
+            for spec in dynamic_revs:
+                outer.extend(["-R", dynamic_remote_arg(spec, "mid")])
             outer.append(f"{bastion_user}@{bastion_host}")
             inner: List[str] = ["ssh", "-T", "-N"] + keepalive
             add_port(inner, ssh_cfg.get("container_port") or ssh_port)
             for spec in revs:
                 inner.extend(["-R", f"{spec['remote']}:localhost:{spec['mid']}"])
+            for spec in dynamic_revs:
+                inner.extend(["-R", remote_tcp_arg(spec, "remote", "localhost", "mid")])
             inner.append(f"{target_user}@{target_ip}")
             outer.append(" ".join(inner))
             cmd = outer
@@ -1098,6 +1125,8 @@ class ContainerManager:
             add_forwards(cmd)
             for spec in self._reverse_specs(ssh_cfg):
                 cmd.extend(["-R", f"{spec['remote']}:localhost:{spec['local']}"])
+            for spec in self._remote_dynamic_specs(ssh_cfg):
+                cmd.extend(["-R", dynamic_remote_arg(spec)])
             cmd.append(f"{target_user}@{target_ip}")
 
         if password_login and password:
@@ -1309,6 +1338,56 @@ done
             if parsed:
                 specs.append(parsed)
         return specs
+
+    def _remote_dynamic_specs(self, ssh_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Parse remote dynamic SOCKS specs for OpenSSH -R [bind:]port."""
+        revs = ssh_cfg.get("remote_dynamic_forwards") or []
+        specs: List[Dict[str, Any]] = []
+
+        def _parse_bind_port(value: str) -> Optional[Dict[str, Any]]:
+            raw = value.strip()
+            if not raw:
+                return None
+            parts = raw.split(":")
+            if len(parts) == 1:
+                return {"bind": "127.0.0.1", "remote": int(parts[0]), "mid": None}
+            if len(parts) == 2:
+                first, second = parts
+                if first.isdigit():
+                    return {"bind": "127.0.0.1", "remote": int(first), "mid": int(second)}
+                return {"bind": first, "remote": int(second), "mid": None}
+            if len(parts) == 3:
+                bind, remote, mid = parts
+                return {"bind": bind, "remote": int(remote), "mid": int(mid)}
+            return None
+
+        def _parse(item: Any) -> Optional[Dict[str, Any]]:
+            if isinstance(item, int):
+                return {"bind": "127.0.0.1", "remote": int(item), "mid": None}
+            if isinstance(item, str):
+                return _parse_bind_port(item)
+            if isinstance(item, dict):
+                remote = item.get("remote", item.get("port"))
+                mid = item.get("intermediate") or item.get("mid")
+                if remote is None:
+                    return None
+                bind = str(item.get("bind", "127.0.0.1") or "").strip() or "127.0.0.1"
+                return {
+                    "bind": bind,
+                    "remote": int(remote),
+                    "mid": int(mid) if mid else None,
+                }
+            return None
+
+        for item in revs:
+            try:
+                parsed = _parse(item)
+            except (TypeError, ValueError):
+                parsed = None
+            if parsed:
+                specs.append(parsed)
+        return specs
+
     async def _ensure_ports_free(self, ports: List[int], retries: int = 3, delay: float = 1.0) -> bool:
         """隧道重连前多次尝试释放端口。"""
         for attempt in range(retries):
@@ -1342,10 +1421,13 @@ done
                     if not target_ip:
                         raise ValueError("Container IP unknown; cannot start tunnel.")
                 reverse_specs = self._reverse_specs(ssh_cfg)
+                dynamic_reverse_specs = self._remote_dynamic_specs(ssh_cfg)
                 ports = self._forward_ports(ssh_cfg)
                 remote_ports = [spec["remote"] for spec in reverse_specs if spec.get("remote")]
+                remote_ports.extend(spec["remote"] for spec in dynamic_reverse_specs if spec.get("remote"))
                 intermediate_ports = [spec["mid"] for spec in reverse_specs if spec.get("mid")]
-                if reverse_specs:
+                intermediate_ports.extend(spec["mid"] for spec in dynamic_reverse_specs if spec.get("mid"))
+                if reverse_specs or dynamic_reverse_specs:
                     logger.info("Cleaning remote ports before starting: container=%s, intermediate=%s", remote_ports, intermediate_ports)
                     self._reverse_cleanup_ports(remote_ports, intermediate_ports, ssh_cfg, target_ip)
                     await asyncio.sleep(1.0)
@@ -1429,8 +1511,11 @@ done
                                 "starting",
                             }
                             if unhealthy:
-                                logger.warning("Container %s status %s appears unhealthy; attempting restart.", name, status)
-                                await self.restart_container(info=info, name_hint=name)
+                                result = await self.restart_container(info=info, name_hint=name)
+                                if result == "skipped":
+                                    logger.info("Container %s status %s appears unhealthy; restart strategy is none, skip restart.", name, status)
+                                else:
+                                    logger.warning("Container %s status %s appears unhealthy; restart result=%s.", name, status, result)
                         self._tunnel_failure_count = 0
             except Exception as exc:  # pragma: no cover - subprocess errors
                 logger.error("SSH tunnel crashed: %s", exc)
@@ -1528,8 +1613,11 @@ done
             await _wait_for_running()
         elif status in {"terminated", "stopped", "stop", "failed"}:
             logger.warning("Container %s is stopped (%s); attempting to start.", name, status)
-            await self.restart_container(info=info, name_hint=name)
-            await _wait_for_running()
+            result = await self.restart_container(info=info, name_hint=name)
+            if result == "skipped":
+                logger.info("Container %s startup restart skipped because restart strategy is none.", name)
+            elif result in {"restarted", "recreated"}:
+                await _wait_for_running()
         else:
             if status == "running":
                 await self._maybe_run_auto_tasks(info)
@@ -1556,6 +1644,8 @@ done
     def _restart_cfg(self, *, reload: bool = False) -> Dict[str, Any]:
         cfg = self.store.get_section("restart", default={}, reload=reload)
         strategy = (cfg.get("strategy") or "restart").lower()
+        if strategy not in {"restart", "recreate", "none"}:
+            strategy = "restart"
         state = self._restart_state()
         create_count = state.get("create_count") or 0
         try:
