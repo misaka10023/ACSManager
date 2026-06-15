@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from acs_manager.config.loader import dump_settings, get_section, load_settings
+from acs_manager.config.loader import get_section
+from acs_manager.config.store import ConfigStore
 
 
 class ContainerScopedStore:
@@ -34,15 +35,16 @@ class ContainerScopedStore:
             payload["restart"] = restart_clean
         return payload
 
-    def __init__(self, path: str, container_id: str) -> None:
-        self.path = path
+    def __init__(self, base_store: ConfigStore, container_id: str) -> None:
+        self.base_store = base_store
         self.container_id = str(container_id)
-        self._cache: Optional[Dict[str, Any]] = None
+
+    @property
+    def path(self):
+        return str(self.base_store.path)
 
     def _read_root(self, reload: bool = False) -> Dict[str, Any]:
-        if reload or self._cache is None:
-            self._cache = load_settings(self.path)
-        return dict(self._cache or {})
+        return self.base_store.read(reload=reload)
 
     def _find_container(self, root: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         containers: List[Dict[str, Any]] = root.get("containers") or []
@@ -86,9 +88,7 @@ class ContainerScopedStore:
         return get_section(self.read(reload=reload), key, default)
 
     def _write_root(self, root: Dict[str, Any]) -> None:
-        dump_settings(self.path, root)
-        # refresh cache
-        self._cache = dict(root)
+        self.base_store.write(root)
 
     def update(self, changes: Dict[str, Any]) -> Dict[str, Any]:
         root = self._read_root(reload=False)
@@ -189,9 +189,9 @@ class ContainerScopedStore:
         return self.read(reload=False)
 
     def reload(self) -> Dict[str, Any]:
-        self._cache = load_settings(self.path)
+        self.base_store.reload()
         return self.read(reload=False)
 
     def format(self) -> str:
         # Mimic ConfigStore API
-        return self.path.split(".")[-1]
+        return str(self.base_store.path).split(".")[-1]

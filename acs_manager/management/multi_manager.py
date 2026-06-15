@@ -121,9 +121,7 @@ class MultiContainerManager:
             cid = profile["id"]
             if cid in self.managers:
                 continue
-            scoped_store = ContainerScopedStore(self.base_store.path, cid) if hasattr(self.base_store, "path") else None
-            if scoped_store is None:
-                raise ValueError("Base config store must expose path for scoped containers.")
+            scoped_store = ContainerScopedStore(self.base_store, cid)
             manager = ContainerManager(scoped_store, container_id=cid, display_name=profile.get("name"))
             self.managers[cid] = manager
             manager.bind_state_store(self.state_store)
@@ -202,9 +200,7 @@ class MultiContainerManager:
                     await self._stop_tasks_for(manager, tasks)
                     self._tasks_by_manager[cid] = []
                 continue
-            scoped_store = ContainerScopedStore(self.base_store.path, cid) if hasattr(self.base_store, "path") else None
-            if scoped_store is None:
-                raise ValueError("Base config store must expose path for scoped containers.")
+            scoped_store = ContainerScopedStore(self.base_store, cid)
             manager = ContainerManager(scoped_store, container_id=cid, display_name=name)
             self.managers[cid] = manager
             manager.bind_state_store(self.state_store)
