@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import Body, Depends, FastAPI, Form, HTTPException, Query, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from acs_manager.config.store import ConfigStore
@@ -173,6 +173,21 @@ def bind_multi_manager(instance: MultiContainerManager) -> None:
 def bind_config_store(store: ConfigStore) -> None:
     global config_store
     config_store = store
+    _warn_if_default_secret()
+
+
+def _warn_if_default_secret() -> None:
+    """Log an error when WebUI auth is enabled with the built-in default secret_key."""
+    try:
+        auth_cfg = _auth_settings(reload=True)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Unable to inspect auth settings for secret check: %s", exc)
+        return
+    if auth_cfg.get("enabled") and auth_cfg.get("secret_key") == DEFAULT_SECRET:
+        logger.error(
+            "WebUI auth enabled but secret_key is the default; sessions can be forged. "
+            "Set webui.auth.secret_key in config."
+        )
 
 
 def _resolve_manager(container_id: Optional[str] = None) -> Optional[ContainerManager]:
@@ -313,7 +328,7 @@ async def static_files(path: str, request: Request) -> Response:
     if not full_path.is_file():
         logger.warning("Static file not found: %s -> %s", request.url.path, full_path)
         raise HTTPException(status_code=404, detail="Not Found")
-    return Response(full_path.read_bytes(), media_type=None)
+    return FileResponse(full_path)
 
 
 @app.get("/state")
@@ -552,7 +567,10 @@ def list_acs_tasks(
 
 
 @app.get("/container-ip")
-def container_ip(container_id: Optional[str] = Query(None)) -> dict:
+def container_ip(
+    container_id: Optional[str] = Query(None),
+    user: str = Depends(require_auth),
+) -> dict:
     mgr = _resolve_manager(container_id)
     if mgr is None:
         raise HTTPException(status_code=503, detail="Manager not wired to web UI yet")
