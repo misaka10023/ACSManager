@@ -184,8 +184,10 @@ def _warn_if_default_secret() -> None:
         logger.debug("Unable to inspect auth settings for secret check: %s", exc)
         return
     secret_key = auth_cfg.get("secret_key")
-    bad_secrets = {"", "change-me-please", None}
-    if auth_cfg.get("enabled") and secret_key in bad_secrets:
+    secret_value = secret_key if isinstance(secret_key, str) else ""
+    is_blank = not secret_value.strip()
+    is_default = secret_value == DEFAULT_SECRET
+    if auth_cfg.get("enabled") and (is_blank or is_default):
         logger.error(
             "WebUI auth is enabled but secret_key is empty or the default placeholder; "
             "sessions can be forged. Update webui.auth.secret_key."
@@ -1036,7 +1038,10 @@ async def replace_config(payload: dict = Body(..., embed=False), user: str = Dep
 def _latest_log_file() -> Path:
     if not LOG_DIR.exists():
         raise FileNotFoundError("logs directory not found")
-    log_files = sorted(LOG_DIR.glob("*.log"), key=lambda p: p.stat().st_mtime)
+    log_files = sorted(
+        {*LOG_DIR.glob("*.log"), *LOG_DIR.glob("acs-manager.log.*")},
+        key=lambda p: p.stat().st_mtime,
+    )
     if not log_files:
         raise FileNotFoundError("no log file found")
     return log_files[-1]
