@@ -524,10 +524,14 @@ class ContainerManager:
         if restart_cfg.get("strategy") == "recreate":
             base_name = self.display_name or name
             logger.warning("Recreate strategy enabled; creating new task for %s (base name: %s)", name, base_name)
-            if service_type == "notebook":
-                created = await asyncio.to_thread(self._recreate_notebook_task, base_name, recreate_target or {})
-            else:
-                created = await asyncio.to_thread(self._recreate_container_task, base_name, recreate_target or {})
+            try:
+                if service_type == "notebook":
+                    created = await asyncio.to_thread(self._recreate_notebook_task, base_name, recreate_target or {})
+                else:
+                    created = await asyncio.to_thread(self._recreate_container_task, base_name, recreate_target or {})
+            except Exception as exc:
+                logger.error("Recreate task call failed: %s", exc, exc_info=True)
+                return "error"
             if created:
                 return "recreated"
             logger.error("Recreate task failed; not falling back to restart original task.")
@@ -1436,14 +1440,14 @@ done
     async def _ensure_ports_free(self, ports: List[int], retries: int = 3, delay: float = 1.0) -> bool:
         """隧道重连前多次尝试释放端口。"""
         for attempt in range(retries):
-            if self._ports_available(ports):
+            if await asyncio.to_thread(self._ports_available, ports):
                 return True
             await self._stop_tunnel_locked()
-            self._kill_ssh_on_ports(ports)
-            self._remote_cleanup_ports(ports)
+            await asyncio.to_thread(self._kill_ssh_on_ports, ports)
+            await asyncio.to_thread(self._remote_cleanup_ports, ports)
             if attempt < retries - 1:
                 await asyncio.sleep(delay)
-        return self._ports_available(ports)
+        return await asyncio.to_thread(self._ports_available, ports)
 
     async def start_tunnel(self) -> None:
         """启动 SSH 隧道（若未运行）。"""
@@ -1489,7 +1493,7 @@ done
                 if ports and not await self._ensure_ports_free(ports):
                     self.state["tunnel_status"] = "error"
                     return
-                cmd = self.build_tunnel_command()
+                cmd = await asyncio.to_thread(self.build_tunnel_command)
             except Exception as exc:
                 logger.error("Cannot build tunnel command: %s", exc)
                 self.state["tunnel_status"] = "error"
