@@ -177,16 +177,18 @@ def bind_config_store(store: ConfigStore) -> None:
 
 
 def _warn_if_default_secret() -> None:
-    """Log an error when WebUI auth is enabled with the built-in default secret_key."""
+    """Log an error when WebUI auth is enabled with an empty or default placeholder secret_key."""
     try:
         auth_cfg = _auth_settings(reload=True)
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("Unable to inspect auth settings for secret check: %s", exc)
         return
-    if auth_cfg.get("enabled") and auth_cfg.get("secret_key") == DEFAULT_SECRET:
+    secret_key = auth_cfg.get("secret_key")
+    bad_secrets = {"", "change-me-please", None}
+    if auth_cfg.get("enabled") and secret_key in bad_secrets:
         logger.error(
-            "WebUI auth enabled but secret_key is the default; sessions can be forged. "
-            "Set webui.auth.secret_key in config."
+            "WebUI auth is enabled but secret_key is empty or the default placeholder; "
+            "sessions can be forged. Update webui.auth.secret_key."
         )
 
 
@@ -322,7 +324,9 @@ async def static_files(path: str, request: Request) -> Response:
         static_root = STATIC_DIR.resolve()
     except Exception:
         static_root = STATIC_DIR
-    if not str(full_path).startswith(str(static_root)):
+    try:
+        full_path.relative_to(static_root)
+    except ValueError:
         logger.warning("Blocked static path traversal: %s -> %s", request.url.path, full_path)
         raise HTTPException(status_code=404, detail="Not Found")
     if not full_path.is_file():
@@ -1007,6 +1011,8 @@ async def _post_config_change(old_cfg: Dict[str, Any], new_cfg: Dict[str, Any]) 
         except Exception as exc:  # pragma: no cover
             logger.error("Failed to restart SSH tunnel (%s): %s", getattr(mgr, "container_id", "unknown"), exc)
 
+    _warn_if_default_secret()
+
 
 @app.patch("/config")
 async def patch_config(payload: dict = Body(..., embed=False), user: str = Depends(require_auth)) -> dict:
@@ -1030,7 +1036,7 @@ async def replace_config(payload: dict = Body(..., embed=False), user: str = Dep
 def _latest_log_file() -> Path:
     if not LOG_DIR.exists():
         raise FileNotFoundError("logs directory not found")
-    log_files = sorted(LOG_DIR.glob("*.log"))
+    log_files = sorted(LOG_DIR.glob("*.log"), key=lambda p: p.stat().st_mtime)
     if not log_files:
         raise FileNotFoundError("no log file found")
     return log_files[-1]
