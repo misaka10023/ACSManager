@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import base64
 import datetime as dt
-import json
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -13,6 +12,7 @@ from requests import HTTPError
 from Crypto.Cipher import PKCS1_v1_5
 from Crypto.PublicKey import RSA
 
+from acs_manager.common.ip_utils import extract_ip as _shared_extract_ip
 from acs_manager.config.store import ConfigStore
 
 
@@ -309,70 +309,10 @@ class ContainerClient:
                     continue
         return dt.datetime.min
 
-    @staticmethod
-    def _looks_like_ip(value: Any) -> bool:
-        text = str(value or "").strip()
-        parts = text.split(".")
-        if len(parts) != 4:
-            return False
-        try:
-            return all(0 <= int(part) <= 255 for part in parts)
-        except ValueError:
-            return False
-
     @classmethod
     def _extract_ip_candidate(cls, payload: Any) -> Optional[str]:
         """Extract an IP from nested ACS payloads or captured text bodies."""
-        if isinstance(payload, dict):
-            for key in ("instanceIp", "headerNotebookIp", "container_ip", "ip", "host", "address"):
-                if key not in payload:
-                    continue
-                candidate = cls._extract_ip_candidate(payload.get(key))
-                if candidate:
-                    return candidate
-            for value in payload.values():
-                candidate = cls._extract_ip_candidate(value)
-                if candidate:
-                    return candidate
-            return None
-
-        if isinstance(payload, (list, tuple)):
-            for item in payload:
-                candidate = cls._extract_ip_candidate(item)
-                if candidate:
-                    return candidate
-            return None
-
-        if not isinstance(payload, str):
-            return None
-
-        text = payload.strip()
-        if not text:
-            return None
-        if cls._looks_like_ip(text):
-            return text
-        if text[:1] in "{[":
-            try:
-                candidate = cls._extract_ip_candidate(json.loads(text))
-                if candidate:
-                    return candidate
-            except Exception:
-                pass
-        normalized = (
-            text.replace("/", " ")
-            .replace("\\", " ")
-            .replace("=", " ")
-            .replace(":", " ")
-            .replace(",", " ")
-            .replace('"', " ")
-            .replace("'", " ")
-            .replace("(", " ")
-            .replace(")", " ")
-        )
-        for token in normalized.split():
-            if cls._looks_like_ip(token):
-                return token
-        return None
+        return _shared_extract_ip(payload)
 
     def _match_instance_from_sources(
         self,

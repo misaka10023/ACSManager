@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from collections import deque
 from typing import Any, Callable, Deque, Dict, Optional
+
+from acs_manager.common.ip_utils import extract_ip as _shared_extract_ip
 
 logger = logging.getLogger(__name__)
 
@@ -59,65 +60,4 @@ class PacketSniffer:
     @classmethod
     def extract_ip(cls, payload: Any) -> Optional[str]:
         """Extract an IP from ACS API payloads, captured bodies, or loose text."""
-        if isinstance(payload, dict):
-            for key in ("instanceIp", "headerNotebookIp", "container_ip", "ip", "host", "address"):
-                if key not in payload:
-                    continue
-                candidate = cls.extract_ip(payload.get(key))
-                if candidate:
-                    return candidate
-            for value in payload.values():
-                candidate = cls.extract_ip(value)
-                if candidate:
-                    return candidate
-            return None
-
-        if isinstance(payload, (list, tuple)):
-            for item in payload:
-                candidate = cls.extract_ip(item)
-                if candidate:
-                    return candidate
-            return None
-
-        if not isinstance(payload, str):
-            return None
-
-        text = payload.strip()
-        if not text:
-            return None
-        if cls._looks_like_ip(text):
-            return text
-
-        if text[:1] in "{[":
-            try:
-                candidate = cls.extract_ip(json.loads(text))
-                if candidate:
-                    return candidate
-            except Exception:
-                pass
-
-        normalized = (
-            text.replace("/", " ")
-            .replace("\\", " ")
-            .replace("=", " ")
-            .replace(":", " ")
-            .replace(",", " ")
-            .replace('"', " ")
-            .replace("'", " ")
-            .replace("(", " ")
-            .replace(")", " ")
-        )
-        for token in normalized.split():
-            if cls._looks_like_ip(token):
-                return token
-        return None
-
-    @staticmethod
-    def _looks_like_ip(text: str) -> bool:
-        parts = text.split(".")
-        if len(parts) != 4:
-            return False
-        try:
-            return all(0 <= int(part) <= 255 for part in parts)
-        except ValueError:
-            return False
+        return _shared_extract_ip(payload)
