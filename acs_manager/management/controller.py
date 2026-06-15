@@ -1179,12 +1179,14 @@ class ContainerManager:
         return cmd
 
     def build_tunnel_command(self) -> List[str]:
-        """生成带端口转发的 SSH 隧道命令。"""
-        base = self.build_ssh_command()
-        mode = (self._ssh_cfg(reload=False).get("mode") or "jump").lower()
-        if mode == "double":
-            return base
-        return ["ssh", "-o", "ExitOnForwardFailure=yes", "-N"] + base[1:]
+        """生成带端口转发的 SSH 隧道命令。
+
+        ``build_ssh_command`` already produces a tunnel-ready command
+        (``ssh -T -N`` + keepalive options including ``ExitOnForwardFailure=yes``)
+        for both ``direct`` / ``jump`` and ``double`` modes, so no extra prefix
+        is needed here.
+        """
+        return self.build_ssh_command()
 
     def _has_tunnel_forwards(self, ssh_cfg: Dict[str, Any]) -> bool:
         """Return true only when an SSH tunnel has explicit forwarding work."""
