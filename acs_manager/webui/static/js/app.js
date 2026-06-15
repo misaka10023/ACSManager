@@ -402,17 +402,17 @@
     row.innerHTML = `
       <label class="flex flex-col gap-1 text-[11px]">
         <span>本地端口</span>
-        <input type="number" class="input input-xs" data-field="local" value="${values.local ?? ''}">
+        <input type="number" class="input input-xs" data-field="local" value="${escapeHtml(String(values.local ?? ''))}">
       </label>
       <label class="flex flex-col gap-1 text-[11px]">
         <span>容器端口</span>
-        <input type="number" class="input input-xs" data-field="remote" value="${values.remote ?? ''}">
+        <input type="number" class="input input-xs" data-field="remote" value="${escapeHtml(String(values.remote ?? ''))}">
       </label>
       ${
         isReverse
           ? `<label class="flex flex-col gap-1 text-[11px]">
               <span>中间端口</span>
-              <input type="number" class="input input-xs" data-field="mid" value="${values.mid ?? ''}">
+              <input type="number" class="input input-xs" data-field="mid" value="${escapeHtml(String(values.mid ?? ''))}">
             </label>`
           : `<div class="flex items-center justify-end">
               <button type="button" class="btn btn-danger btn-xxs" data-action="remove-row">删除</button>
@@ -436,15 +436,15 @@
     row.innerHTML = `
       <label class="flex flex-col gap-1 text-[11px]">
         <span>监听地址</span>
-        <input type="text" class="input input-xs" data-field="bind" value="${values.bind || '127.0.0.1'}">
+        <input type="text" class="input input-xs" data-field="bind" value="${escapeHtml(values.bind || '127.0.0.1')}">
       </label>
       <label class="flex flex-col gap-1 text-[11px]">
         <span>SOCKS 端口</span>
-        <input type="number" class="input input-xs" data-field="remote" value="${values.remote ?? ''}">
+        <input type="number" class="input input-xs" data-field="remote" value="${escapeHtml(String(values.remote ?? ''))}">
       </label>
       <label class="flex flex-col gap-1 text-[11px]">
         <span>中间端口</span>
-        <input type="number" class="input input-xs" data-field="mid" value="${values.mid ?? ''}">
+        <input type="number" class="input input-xs" data-field="mid" value="${escapeHtml(String(values.mid ?? ''))}">
       </label>
       <div class="flex items-center justify-end">
         <button type="button" class="btn btn-danger btn-xxs" data-action="remove-row">删除</button>
@@ -485,10 +485,10 @@
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         <label class="flex flex-col gap-1 text-xs text-slate-600">任务标题
-          <input type="text" class="input" data-field="task_title" value="${task.title || ''}" placeholder="如：启动 ComfyUI">
+          <input type="text" class="input" data-field="task_title" value="${escapeHtml(task.title || '')}" placeholder="如：启动 ComfyUI">
         </label>
         <label class="flex flex-col gap-1 text-xs text-slate-600">任务 ID
-          <input type="text" class="input" data-field="task_id" value="${task.id || ''}" placeholder="如：start-comfyui">
+          <input type="text" class="input" data-field="task_id" value="${escapeHtml(task.id || '')}" placeholder="如：start-comfyui">
         </label>
         <label class="flex items-center gap-2 text-xs text-slate-600 mt-6">
           <input type="checkbox" class="checkbox" data-field="task_enabled" ${task.enabled === false ? '' : 'checked'}>
@@ -514,16 +514,16 @@
           </select>
         </label>
         <label class="flex flex-col gap-1 text-xs text-slate-600">screen Session
-          <input type="text" class="input" data-field="task_session" value="${runner.session || ''}" placeholder="如：comfyui">
+          <input type="text" class="input" data-field="task_session" value="${escapeHtml(runner.session || '')}" placeholder="如：comfyui">
         </label>
         <label class="flex flex-col gap-1 text-xs text-slate-600 md:col-span-2 xl:col-span-1">工作目录
-          <input type="text" class="input" data-field="task_workdir" value="${task.workdir || ''}" placeholder="/workspace/project">
+          <input type="text" class="input" data-field="task_workdir" value="${escapeHtml(task.workdir || '')}" placeholder="/workspace/project">
         </label>
         <label class="flex flex-col gap-1 text-xs text-slate-600 md:col-span-2">日志文件
-          <input type="text" class="input" data-field="task_log_file" value="${task.log_file || ''}" placeholder="/workspace/logs/task.log">
+          <input type="text" class="input" data-field="task_log_file" value="${escapeHtml(task.log_file || '')}" placeholder="/workspace/logs/task.log">
         </label>
         <label class="flex flex-col gap-1 text-xs text-slate-600 md:col-span-2 xl:col-span-3">命令
-          <textarea class="input min-h-28" data-field="task_command" placeholder="如：python main.py --listen 0.0.0.0 --port 8188">${task.command || ''}</textarea>
+          <textarea class="input min-h-28" data-field="task_command" placeholder="如：python main.py --listen 0.0.0.0 --port 8188">${escapeHtml(task.command || '')}</textarea>
         </label>
       </div>
       <div class="text-[11px] text-slate-500">auto_on_start 会在容器进入 Running 后自动尝试执行；ensure_running + screen 适合常驻服务。</div>
@@ -553,10 +553,10 @@
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <label class="flex flex-col gap-1 text-xs text-slate-600">名称(name)
-          <input type="text" class="input" data-field="name" value="${container.name || ''}">
+          <input type="text" class="input" data-field="name" value="${escapeHtml(container.name || '')}">
         </label>
         <label class="flex flex-col gap-1 text-xs text-slate-600">ACS 任务名/实例名
-          <input type="text" list="acs-task-options" class="input" data-field="container_name" value="${acs.container_name || ''}">
+          <input type="text" list="acs-task-options" class="input" data-field="container_name" value="${escapeHtml(acs.container_name || '')}">
           <span class="text-[11px] text-slate-400">notebook 模式可填基础名，如 Notebook_2603274032；后端会自动匹配到实际副本名。</span>
         </label>
         <label class="flex flex-col gap-1 text-xs text-slate-600">重启策略
@@ -573,14 +573,14 @@
             <option value="double" ${ssh.mode === 'double' ? 'selected' : ''}>double</option>
           </select>
         </label>
-        <label class="flex flex-col gap-1 text-xs text-slate-600">跳板/远端 Host<input type="text" class="input" data-field="bastion_host" value="${ssh.bastion_host || ''}"></label>
-        <label class="flex flex-col gap-1 text-xs text-slate-600">跳板用户<input type="text" class="input" data-field="bastion_user" value="${ssh.bastion_user || ''}"></label>
-        <label class="flex flex-col gap-1 text-xs text-slate-600">目标用户<input type="text" class="input" data-field="target_user" value="${ssh.target_user || ''}"></label>
-        <label class="flex flex-col gap-1 text-xs text-slate-600">SSH 端口<input type="number" class="input" data-field="port" value="${ssh.port ?? ''}"></label>
-        <label class="flex flex-col gap-1 text-xs text-slate-600">容器 SSH 端口<input type="number" class="input" data-field="container_port" value="${ssh.container_port ?? ''}"></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">跳板/远端 Host<input type="text" class="input" data-field="bastion_host" value="${escapeHtml(ssh.bastion_host || '')}"></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">跳板用户<input type="text" class="input" data-field="bastion_user" value="${escapeHtml(ssh.bastion_user || '')}"></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">目标用户<input type="text" class="input" data-field="target_user" value="${escapeHtml(ssh.target_user || '')}"></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">SSH 端口<input type="number" class="input" data-field="port" value="${escapeHtml(String(ssh.port ?? ''))}"></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">容器 SSH 端口<input type="number" class="input" data-field="container_port" value="${escapeHtml(String(ssh.container_port ?? ''))}"></label>
         <label class="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" class="checkbox" data-field="password_login" ${ssh.password_login ? 'checked' : ''}>密码登录</label>
-        <label class="flex flex-col gap-1 text-xs text-slate-600">密码<input type="text" class="input" data-field="password" value="${ssh.password || ''}"></label>
-        <label class="flex flex-col gap-1 text-xs text-slate-600">容器 IP(兜底)<input type="text" class="input" data-field="container_ip" value="${ssh.container_ip || ''}"><span class="text-[11px] text-slate-400">自动解析失败时才需要手填；notebook 模式会优先走 /api/notebook/task 系列接口。</span></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">密码<input type="text" class="input" data-field="password" value="${escapeHtml(ssh.password || '')}"></label>
+        <label class="flex flex-col gap-1 text-xs text-slate-600">容器 IP(兜底)<input type="text" class="input" data-field="container_ip" value="${escapeHtml(ssh.container_ip || '')}"><span class="text-[11px] text-slate-400">自动解析失败时才需要手填；notebook 模式会优先走 /api/notebook/task 系列接口。</span></label>
       </div>
       <div class="space-y-2">
         <div class="flex items-center justify-between text-xs text-slate-600">
