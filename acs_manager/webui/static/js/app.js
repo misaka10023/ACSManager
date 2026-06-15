@@ -40,6 +40,15 @@
     if (layer) layer.classList.remove('is-visible');
   }
 
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   // ---------- Dashboard (multi-container) ----------
   let containersCache = [];
   let tasksCache = [];
@@ -49,8 +58,9 @@
     if (!datalist) return;
     datalist.innerHTML = (list || [])
       .map((t) => {
-        const meta = [t.service_type || t.task_type, t.status].filter(Boolean).join(' / ');
-        return `<option value="${t.name}">${t.name}${meta ? ` (${meta})` : ''}</option>`;
+        const name = escapeHtml(t.name);
+        const meta = escapeHtml([t.service_type || t.task_type, t.status].filter(Boolean).join(' / '));
+        return `<option value="${name}">${name}${meta ? ` (${meta})` : ''}</option>`;
       })
       .join('');
   }
@@ -76,23 +86,28 @@
   }
 
   function renderTaskSummary(containerId, task) {
-    const status = task.last_status || 'idle';
-    const message = task.last_message || '';
-    const meta = taskLabel(task);
+    const status = escapeHtml(task.last_status || 'idle');
+    const message = escapeHtml(task.last_message || '');
+    const meta = escapeHtml(taskLabel(task));
+    const title = escapeHtml(task.title || task.id);
+    const taskId = escapeHtml(task.id);
+    const lastRunAt = escapeHtml(task.last_run_at || '');
+    const logFile = escapeHtml(task.log_file || '');
+    const cid = escapeHtml(containerId);
     return `
       <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-3 space-y-2">
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0">
-            <div class="text-sm font-medium text-slate-900 truncate">${task.title || task.id}</div>
-            <div class="text-[11px] text-slate-500 break-all">${task.id}</div>
+            <div class="text-sm font-medium text-slate-900 truncate">${title}</div>
+            <div class="text-[11px] text-slate-500 break-all">${taskId}</div>
           </div>
           <div class="text-[11px] text-slate-500 whitespace-nowrap">${meta}</div>
         </div>
-        <div class="text-xs text-slate-600">状态: ${status}${task.last_run_at ? ` · ${task.last_run_at}` : ''}</div>
+        <div class="text-xs text-slate-600">状态: ${status}${task.last_run_at ? ` · ${lastRunAt}` : ''}</div>
         ${message ? `<div class="text-xs text-slate-500 break-words">${message}</div>` : ''}
         <div class="flex items-center justify-between gap-2">
-          ${task.log_file ? `<div class="text-[11px] text-slate-400 truncate" title="${task.log_file}">${task.log_file}</div>` : '<div></div>'}
-          <button class="btn btn-secondary btn-xxs" data-action="run-task" data-id="${containerId}" data-task-id="${task.id}">执行任务</button>
+          ${task.log_file ? `<div class="text-[11px] text-slate-400 truncate" title="${logFile}">${logFile}</div>` : '<div></div>'}
+          <button class="btn btn-secondary btn-xxs" data-action="run-task" data-id="${cid}" data-task-id="${taskId}">执行任务</button>
         </div>
       </div>
     `;
@@ -107,16 +122,17 @@
     }
     const html = containers
       .map((c) => {
-        const cid = c.id || c.name || 'unknown';
-        const name = c.name || cid;
-        const ip = c.container_ip || 'unknown';
-        const source = c.ip_source || 'unknown';
-        const status = c.container_status || 'unknown';
-        const serviceType = c.service_type || 'container';
-        const tunnel = c.tunnel_status || 'stopped';
-        const lastSeen = c.last_seen || '';
-        const remaining = c.remaining_time_str || '';
-        const configuredName = c.configured_container_name || '';
+        const cidRaw = c.id || c.name || 'unknown';
+        const cid = escapeHtml(cidRaw);
+        const name = escapeHtml(c.name || cidRaw);
+        const ip = escapeHtml(c.container_ip || 'unknown');
+        const source = escapeHtml(c.ip_source || 'unknown');
+        const status = escapeHtml(c.container_status || 'unknown');
+        const serviceType = escapeHtml(c.service_type || 'container');
+        const tunnel = escapeHtml(c.tunnel_status || 'stopped');
+        const lastSeen = escapeHtml(c.last_seen || '');
+        const remaining = escapeHtml(c.remaining_time_str || '');
+        const configuredName = escapeHtml(c.configured_container_name || '');
         const taskList = Array.isArray(c.tasks) ? c.tasks : [];
         return `
           <div class="rounded-2xl border border-white/60 bg-white/80 shadow-sm shadow-slate-900/10 p-4 flex flex-col gap-2">
@@ -134,7 +150,7 @@
               taskList.length
                 ? `<div class="mt-2 space-y-2">
                     <div class="text-xs font-semibold text-slate-700">任务</div>
-                    <div class="space-y-2">${taskList.map((task) => renderTaskSummary(cid, task)).join('')}</div>
+                    <div class="space-y-2">${taskList.map((task) => renderTaskSummary(cidRaw, task)).join('')}</div>
                   </div>`
                 : ''
             }
