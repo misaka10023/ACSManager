@@ -6,6 +6,7 @@ import asyncio
 import datetime as dt
 import logging
 import shutil
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -35,13 +36,21 @@ async def start_web_ui(web_cfg: dict[str, Any]) -> None:
 
 
 def setup_logging(log_level: str) -> Path:
-    """Configure logging to console + daily file under ./logs/YYYY-MM-DD.log."""
+    """Configure logging to console + daily-rotated file under ./logs/acs-manager.log."""
     log_dir = Path("logs")
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / f"{dt.date.today()}.log"
+    log_path = log_dir / "acs-manager.log"
 
+    file_handler = TimedRotatingFileHandler(
+        log_path,
+        when="midnight",
+        backupCount=30,
+        encoding="utf-8",
+        utc=False,
+    )
+    file_handler.suffix = "%Y-%m-%d"
     handlers = [
-        logging.FileHandler(log_path, encoding="utf-8"),
+        file_handler,
         logging.StreamHandler(),
     ]
     logging.basicConfig(
