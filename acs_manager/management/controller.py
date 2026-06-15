@@ -653,6 +653,12 @@ class ContainerManager:
             "ExitOnForwardFailure=yes",
             "-o",
             f"StrictHostKeyChecking={strict_mode}",
+            # All SSH invocations run without a TTY (asyncio.create_subprocess_exec
+            # / subprocess.run). BatchMode=yes prevents host-key or password
+            # prompts from blocking until timeout. accept-new still adds new
+            # keys silently under BatchMode=yes; only key conflicts will fail.
+            "-o",
+            "BatchMode=yes",
         ]
         if known_hosts is not None:
             options.extend([
@@ -1252,7 +1258,11 @@ class ContainerManager:
         """在远端主机上强杀占用指定端口的进程，优先 netstat。"""
         if not host or not user or not ports:
             return
-        cmd = ["ssh", "-T"]
+        # Inherit BatchMode=yes / StrictHostKeyChecking from the same keepalive
+        # policy used elsewhere so a brand-new container IP cannot stall the
+        # cleanup on a host-authenticity prompt until the 8s timeout.
+        keepalive = self._ssh_keepalive_options(self._ssh_cfg(reload=False))
+        cmd = ["ssh", "-T", *keepalive]
         if jump:
             cmd += ["-J", jump]
         if ssh_port:
