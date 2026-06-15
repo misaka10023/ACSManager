@@ -32,7 +32,7 @@ containers:
       password_login: false              # true 使用密码，false 使用密钥
       password: ""                       # 密码登录的密码
       # strict_host_key_checking: accept-new   # yes|no|accept-new|ask；ask 在守护进程中无 TTY 不可用
-      # user_known_hosts_file: ""              # 自定义 known_hosts 路径；留空时 accept-new 走 ~/.ssh/known_hosts，no 才走空设备
+      # user_known_hosts_file: ""              # 留空时 yes/accept-new/ask 都走 ~/.ssh/known_hosts；仅 strict_host_key_checking=no 走空设备。daemon 模式不要用 ask（无 TTY 会阻塞）。
       remote_dynamic_forwards: []        # 远端动态 SOCKS (-R)，如 {"bind":"127.0.0.1","remote":17890}
       forwards: []                       # 正向转发列表 (-L)，如 {"local": 8080, "remote": 80}
       reverse_forwards: []               # 反向转发列表 (-R)，支持 {"local":8080,"remote":80,"mid":58080}
