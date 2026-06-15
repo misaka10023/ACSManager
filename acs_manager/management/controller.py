@@ -64,6 +64,7 @@ class ContainerManager:
         self._tunnel_failure_count = 0
         self._tunnel_config_event = asyncio.Event()
         self._task_exec_lock = asyncio.Lock()
+        self._ssh_ask_warned = False
 
     @staticmethod
     def _normalize_container_name(name: Optional[str]) -> str:
@@ -200,7 +201,7 @@ class ContainerManager:
             if isinstance(ssh_cfg, dict):
                 updated_ssh = dict(ssh_cfg)
                 updated_ssh["container_ip"] = ip
-                self.store.update({"ssh": updated_ssh})
+                await asyncio.to_thread(self.store.update, {"ssh": updated_ssh})
         except Exception as exc:
             logger.warning("Failed to persist container_ip to config: %s", exc)
 
@@ -512,7 +513,7 @@ class ContainerManager:
 
         service_type = str(self._acs_cfg(reload=True).get("service_type") or "container").strip().lower()
         try:
-            task = self.container_client.find_instance_by_name(name)
+            task = await asyncio.to_thread(self.container_client.find_instance_by_name, name)
         except Exception as exc:
             logger.error("Failed to query container %s; cannot restart: %s", name, exc)
             task = None
@@ -524,9 +525,9 @@ class ContainerManager:
             base_name = self.display_name or name
             logger.warning("Recreate strategy enabled; creating new task for %s (base name: %s)", name, base_name)
             if service_type == "notebook":
-                created = self._recreate_notebook_task(base_name, recreate_target or {})
+                created = await asyncio.to_thread(self._recreate_notebook_task, base_name, recreate_target or {})
             else:
-                created = self._recreate_container_task(base_name, recreate_target or {})
+                created = await asyncio.to_thread(self._recreate_container_task, base_name, recreate_target or {})
             if created:
                 return "recreated"
             logger.error("Recreate task failed; not falling back to restart original task.")
@@ -546,7 +547,8 @@ class ContainerManager:
                 auto_terminated = 1 if timeout_limit and timeout_limit != "unlimited" else 0
             logger.warning("Attempting to restart notebook %s (notebook id: %s)", name, notebook_id)
             try:
-                resp = self.container_client.restart_notebook_task(
+                resp = await asyncio.to_thread(
+                    self.container_client.restart_notebook_task,
                     notebook_id,
                     auto_terminated=auto_terminated,
                     timeout_limit=timeout_limit,
@@ -567,7 +569,7 @@ class ContainerManager:
             for task_id in restart_ids:
                 logger.warning("Attempting to restart container %s (task id: %s)", name, task_id)
                 try:
-                    resp = self.container_client.restart_task(task_id)
+                    resp = await asyncio.to_thread(self.container_client.restart_task, task_id)
                 except Exception as exc:
                     logger.error("Restart API call failed: %s", exc)
                     return "error"
@@ -603,23 +605,37 @@ class ContainerManager:
         return command
 
     def _ssh_keepalive_options(self, ssh_cfg: Dict[str, Any]) -> List[str]:
-        """Build the standard 10-element SSH keepalive option list.
+        """Build the standard SSH keepalive option list.
 
         Honors ``ssh.strict_host_key_checking`` (yes|no|accept-new|ask) and
-        ``ssh.user_known_hosts_file`` overrides; falls back to the OS-default
-        null-sink only when strict mode is permissive.
+        ``ssh.user_known_hosts_file`` overrides. Policy:
+
+        - If ``user_known_hosts_file`` is set explicitly, point both
+          UserKnownHostsFile and GlobalKnownHostsFile at it regardless of mode.
+        - Else if ``strict_host_key_checking`` is ``no``, route to the OS null
+          sink (caller explicitly opted out of host-key checking).
+        - Else (``yes`` / ``accept-new`` / ``ask``) omit the known-hosts
+          overrides so OpenSSH falls back to ``~/.ssh/known_hosts``; this
+          preserves trust-on-first-use for ``accept-new``.
         """
         allowed_modes = {"yes", "no", "accept-new", "ask"}
         strict_mode = str(ssh_cfg.get("strict_host_key_checking") or "accept-new").strip().lower()
         if strict_mode not in allowed_modes:
             strict_mode = "accept-new"
 
+        if strict_mode == "ask" and not self._ssh_ask_warned:
+            logger.warning(
+                "ssh.strict_host_key_checking='ask' is not viable without a TTY; "
+                "tunnel may exit. Consider 'accept-new'."
+            )
+            self._ssh_ask_warned = True
+
         os_default_null = "NUL" if os.name == "nt" else "/dev/null"
         configured_known_hosts = ssh_cfg.get("user_known_hosts_file")
         known_hosts: Optional[str]
         if configured_known_hosts:
             known_hosts = str(configured_known_hosts)
-        elif strict_mode in {"no", "accept-new"}:
+        elif strict_mode == "no":
             known_hosts = os_default_null
         else:
             known_hosts = None
@@ -1422,7 +1438,7 @@ done
         for attempt in range(retries):
             if self._ports_available(ports):
                 return True
-            await self.stop_tunnel()
+            await self._stop_tunnel_locked()
             self._kill_ssh_on_ports(ports)
             self._remote_cleanup_ports(ports)
             if attempt < retries - 1:
@@ -1485,21 +1501,25 @@ done
             self.state["tunnel_status"] = "running"
             self._tunnel_started_once = True
 
+    async def _stop_tunnel_locked(self) -> None:
+        """Lock-free tunnel teardown; caller must hold self._proc_lock."""
+        proc = self._tunnel_process
+        if not proc:
+            return
+        if proc.returncode is None:
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                proc.kill()
+        self.state["tunnel_last_exit"] = dt.datetime.now()
+        self.state["tunnel_status"] = "stopped"
+        self._tunnel_process = None
+
     async def stop_tunnel(self) -> None:
-        """停止隧道并更新状态。"""
+        """停止隧道并更新状态。Safe to call from outside the lock."""
         async with self._proc_lock:
-            proc = self._tunnel_process
-            if not proc:
-                return
-            if proc.returncode is None:
-                proc.terminate()
-                try:
-                    await asyncio.wait_for(proc.wait(), timeout=5)
-                except asyncio.TimeoutError:
-                    proc.kill()
-            self.state["tunnel_last_exit"] = dt.datetime.now()
-            self.state["tunnel_status"] = "stopped"
-            self._tunnel_process = None
+            await self._stop_tunnel_locked()
 
     async def restart_tunnel(self) -> None:
         """重启隧道刷新转发与端口。"""
@@ -1572,7 +1592,11 @@ done
             except Exception as exc:  # pragma: no cover - subprocess errors
                 logger.error("SSH tunnel crashed: %s", exc, exc_info=True)
             finally:
-                await self.stop_tunnel()
+                # Only tear down if our captured proc is still the active one;
+                # otherwise restart_tunnel already replaced it and is responsible.
+                async with self._proc_lock:
+                    if self._tunnel_process is proc:
+                        await self._stop_tunnel_locked()
             await asyncio.sleep(3)
 
     async def shutdown(self) -> None:
@@ -1616,17 +1640,18 @@ done
             logger.error("Login failed during startup preparation: %s", exc)
             return
 
-        def _fetch_info_sync() -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+        def _fetch_with_current_name() -> tuple[Optional[str], Optional[Dict[str, Any]]]:
             current_name = self.configured_container_name(reload=True)
             if not current_name:
                 return None, None
             try:
-                return current_name, self.container_client.get_container_instance_info_by_name(current_name)
+                info = self._fetch_info_sync(current_name)
             except Exception as exc:
                 logger.error("Failed to fetch container info for %s: %s", current_name, exc, exc_info=True)
                 return current_name, None
+            return current_name, info
 
-        name, info = await asyncio.to_thread(_fetch_info_sync)
+        name, info = await asyncio.to_thread(_fetch_with_current_name)
         if not info:
             logger.warning("Container %s not found during startup check.", name)
             return
@@ -1641,7 +1666,7 @@ done
         async def _wait_for_running() -> None:
             deadline = dt.datetime.now() + dt.timedelta(seconds=start_timeout)
             while dt.datetime.now() < deadline and not self._stop_requested:
-                latest_name, latest = await asyncio.to_thread(_fetch_info_sync)
+                latest_name, latest = await asyncio.to_thread(_fetch_with_current_name)
                 if not latest:
                     await asyncio.sleep(wait_interval)
                     continue
