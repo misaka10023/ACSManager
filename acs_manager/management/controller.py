@@ -602,6 +602,47 @@ class ContainerManager:
             return f"cd {shlex.quote(workdir)} && {command}"
         return command
 
+    def _ssh_keepalive_options(self, ssh_cfg: Dict[str, Any]) -> List[str]:
+        """Build the standard 10-element SSH keepalive option list.
+
+        Honors ``ssh.strict_host_key_checking`` (yes|no|accept-new|ask) and
+        ``ssh.user_known_hosts_file`` overrides; falls back to the OS-default
+        null-sink only when strict mode is permissive.
+        """
+        allowed_modes = {"yes", "no", "accept-new", "ask"}
+        strict_mode = str(ssh_cfg.get("strict_host_key_checking") or "accept-new").strip().lower()
+        if strict_mode not in allowed_modes:
+            strict_mode = "accept-new"
+
+        os_default_null = "NUL" if os.name == "nt" else "/dev/null"
+        configured_known_hosts = ssh_cfg.get("user_known_hosts_file")
+        known_hosts: Optional[str]
+        if configured_known_hosts:
+            known_hosts = str(configured_known_hosts)
+        elif strict_mode in {"no", "accept-new"}:
+            known_hosts = os_default_null
+        else:
+            known_hosts = None
+
+        options: List[str] = [
+            "-o",
+            "ServerAliveInterval=60",
+            "-o",
+            "ServerAliveCountMax=3",
+            "-o",
+            "ExitOnForwardFailure=yes",
+            "-o",
+            f"StrictHostKeyChecking={strict_mode}",
+        ]
+        if known_hosts is not None:
+            options.extend([
+                "-o",
+                f"UserKnownHostsFile={known_hosts}",
+                "-o",
+                f"GlobalKnownHostsFile={known_hosts}",
+            ])
+        return options
+
     def _build_ssh_exec_command(self, remote_command: str, *, reload_config: bool = True) -> List[str]:
         ssh_cfg = self._ssh_cfg(reload=reload_config)
         target_ip = self.state.get("container_ip") or ssh_cfg.get("container_ip")
@@ -617,21 +658,7 @@ class ContainerManager:
         ssh_port = ssh_cfg.get("port")
         container_port = ssh_cfg.get("container_port") or ssh_port
 
-        known_hosts = "NUL" if os.name == "nt" else "/dev/null"
-        keepalive = [
-            "-o",
-            "ServerAliveInterval=60",
-            "-o",
-            "ServerAliveCountMax=3",
-            "-o",
-            "ExitOnForwardFailure=yes",
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            f"UserKnownHostsFile={known_hosts}",
-            "-o",
-            f"GlobalKnownHostsFile={known_hosts}",
-        ]
+        keepalive = self._ssh_keepalive_options(ssh_cfg)
 
         def add_port(base: List[str], port_value: Any) -> None:
             if port_value:
@@ -930,6 +957,22 @@ class ContainerManager:
                 continue
         return total or None
 
+    def _fetch_info_sync(self, name: str) -> Optional[Dict[str, Any]]:
+        """Synchronous helper: fetch container info, retrying once on 401.
+
+        Designed to be invoked via :func:`asyncio.to_thread` so that the
+        underlying :mod:`requests` calls do not block the event loop.
+        """
+        try:
+            return self.container_client.get_container_instance_info_by_name(name)
+        except Exception as exc:
+            response = getattr(exc, "response", None)
+            status_code = getattr(response, "status_code", None) if response is not None else None
+            if status_code == 401:
+                self.container_client.login()
+                return self.container_client.get_container_instance_info_by_name(name)
+            raise
+
     async def monitor_container(self, *, pre_shutdown_minutes: int = 10, slow_interval: int = 300, fast_interval: int = 30) -> None:
         """周期检查容器状态，接近超时时加快轮询，停止则重启。"""
         while not self._stop_requested:
@@ -939,18 +982,7 @@ class ContainerManager:
                 logger.warning("acs.container_name not configured or placeholder; monitor loop exits.")
                 return
             try:
-                try:
-                    info = self.container_client.get_container_instance_info_by_name(name)
-                except Exception as exc:
-                    # 认证失败尝试重新登录一次
-                    try:
-                        if hasattr(exc, "response") and getattr(exc.response, "status_code", None) == 401:  # type: ignore[attr-defined]
-                            self.container_client.login()
-                            info = self.container_client.get_container_instance_info_by_name(name)
-                        else:
-                            raise
-                    except Exception:
-                        raise
+                info = await asyncio.to_thread(self._fetch_info_sync, name)
                 if info:
                     status = info.get("status")
                     start_time_str = info.get("startTime") or info.get("createTime")
@@ -1023,7 +1055,7 @@ class ContainerManager:
                     logger.warning("Container %s not found; will retry soon.", name)
                     interval = fast_interval
             except Exception as exc:  # pragma: no cover - network/API errors
-                logger.error("Monitor loop error: %s", exc)
+                logger.error("Monitor loop error for %s: %s", self.container_id, exc, exc_info=True)
                 interval = fast_interval
 
             await asyncio.sleep(interval)
@@ -1073,21 +1105,7 @@ class ContainerManager:
             suffix = f"{remote}:{host}:{host_port}"
             return f"{bind}:{suffix}" if bind else suffix
 
-        known_hosts = "NUL" if os.name == "nt" else "/dev/null"
-        keepalive = [
-            "-o",
-            "ServerAliveInterval=60",
-            "-o",
-            "ServerAliveCountMax=3",
-            "-o",
-            "ExitOnForwardFailure=yes",
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            f"UserKnownHostsFile={known_hosts}",
-            "-o",
-            f"GlobalKnownHostsFile={known_hosts}",
-        ]
+        keepalive = self._ssh_keepalive_options(ssh_cfg)
 
         if mode == "double":
             if not bastion_host:
@@ -1425,13 +1443,13 @@ done
                 target_ip = self.state.get("container_ip") or ssh_cfg.get("container_ip")
                 if not target_ip:
                     try:
-                        self.container_client.login()
+                        await asyncio.to_thread(self.container_client.login)
                     except Exception as exc:
                         logger.error("Login failed before resolving container IP: %s", exc)
                     target_ip = (
                         self.state.get("container_ip")
-                        or self.resolve_container_ip(force_login=False)
-                        or self.resolve_container_ip(force_login=True)
+                        or await asyncio.to_thread(lambda: self.resolve_container_ip(force_login=False))
+                        or await asyncio.to_thread(lambda: self.resolve_container_ip(force_login=True))
                     )
                     if not target_ip:
                         raise ValueError("Container IP unknown; cannot start tunnel.")
@@ -1444,7 +1462,13 @@ done
                 intermediate_ports.extend(spec["mid"] for spec in dynamic_reverse_specs if spec.get("mid"))
                 if reverse_specs or dynamic_reverse_specs:
                     logger.info("Cleaning remote ports before starting: container=%s, intermediate=%s", remote_ports, intermediate_ports)
-                    self._reverse_cleanup_ports(remote_ports, intermediate_ports, ssh_cfg, target_ip)
+                    await asyncio.to_thread(
+                        self._reverse_cleanup_ports,
+                        remote_ports,
+                        intermediate_ports,
+                        ssh_cfg,
+                        target_ip,
+                    )
                     await asyncio.sleep(1.0)
                 if ports and not await self._ensure_ports_free(ports):
                     self.state["tunnel_status"] = "error"
@@ -1515,11 +1539,17 @@ done
                             "SSH tunnel failed >=3 times; refreshing container IP via API (container: %s).",
                             name,
                         )
-                        ip = self.resolve_container_ip(force_login=True)
+                        ip = await asyncio.to_thread(lambda: self.resolve_container_ip(force_login=True))
                         if not ip:
                             # 如果 IP 仍未获取但登录正常，可尝试读取容器状态，异常则触发重启
                             try:
-                                info = self.container_client.get_container_instance_info_by_name(name) if name else None
+                                info = (
+                                    await asyncio.to_thread(
+                                        self.container_client.get_container_instance_info_by_name, name
+                                    )
+                                    if name
+                                    else None
+                                )
                             except Exception as exc:  # pragma: no cover - network errors
                                 logger.error("Failed to fetch container status after tunnel failures: %s", exc)
                                 info = None
@@ -1540,7 +1570,7 @@ done
                                     logger.warning("Container %s status %s appears unhealthy; restart result=%s.", name, status, result)
                         self._tunnel_failure_count = 0
             except Exception as exc:  # pragma: no cover - subprocess errors
-                logger.error("SSH tunnel crashed: %s", exc)
+                logger.error("SSH tunnel crashed: %s", exc, exc_info=True)
             finally:
                 await self.stop_tunnel()
             await asyncio.sleep(3)
@@ -1580,23 +1610,23 @@ done
             return
 
         try:
-            self.container_client.login()
+            await asyncio.to_thread(self.container_client.login)
             logger.info("Logged in to ACS for startup check.")
         except Exception as exc:
             logger.error("Login failed during startup preparation: %s", exc)
             return
 
-        def _fetch_info() -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+        def _fetch_info_sync() -> tuple[Optional[str], Optional[Dict[str, Any]]]:
             current_name = self.configured_container_name(reload=True)
             if not current_name:
                 return None, None
             try:
                 return current_name, self.container_client.get_container_instance_info_by_name(current_name)
             except Exception as exc:
-                logger.error("Failed to fetch container info for %s: %s", current_name, exc)
+                logger.error("Failed to fetch container info for %s: %s", current_name, exc, exc_info=True)
                 return current_name, None
 
-        name, info = _fetch_info()
+        name, info = await asyncio.to_thread(_fetch_info_sync)
         if not info:
             logger.warning("Container %s not found during startup check.", name)
             return
@@ -1611,7 +1641,7 @@ done
         async def _wait_for_running() -> None:
             deadline = dt.datetime.now() + dt.timedelta(seconds=start_timeout)
             while dt.datetime.now() < deadline and not self._stop_requested:
-                latest_name, latest = _fetch_info()
+                latest_name, latest = await asyncio.to_thread(_fetch_info_sync)
                 if not latest:
                     await asyncio.sleep(wait_interval)
                     continue

@@ -31,6 +31,8 @@ containers:
       container_port: 22                 # 内层 SSH 端口（double 模式使用）
       password_login: false              # true 使用密码，false 使用密钥
       password: ""                       # 密码登录的密码
+      # strict_host_key_checking: accept-new   # yes|no|accept-new|ask
+      # user_known_hosts_file: ""              # 自定义 known_hosts 路径，留空使用默认
       remote_dynamic_forwards: []        # 远端动态 SOCKS (-R)，如 {"bind":"127.0.0.1","remote":17890}
       forwards: []                       # 正向转发列表 (-L)，如 {"local": 8080, "remote": 80}
       reverse_forwards: []               # 反向转发列表 (-R)，支持 {"local":8080,"remote":80,"mid":58080}
