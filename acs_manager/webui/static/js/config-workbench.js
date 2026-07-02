@@ -696,7 +696,7 @@ window.ConfigWorkbench = (() => {
           [
             renderField({ label: 'SSH 模式', tip: 'direct 直连；jump 使用 -J；double 使用双层 SSH。', control: inputControl('ssh.mode', container.ssh.mode, { type: 'select', choices: [{ value: 'direct', label: 'direct' }, { value: 'jump', label: 'jump' }, { value: 'double', label: 'double' }] }) }),
             renderField({ label: '跳板/远端 Host', tip: 'direct 可留空；jump/double 通常填写跳板机地址。', control: inputControl('ssh.bastion_host', container.ssh.bastion_host, { placeholder: '192.168.10.200' }) }),
-            renderField({ label: '跳板用户', tip: '跳板机登录用户名。', control: inputControl('ssh.bastion_user', container.ssh.bastion_user, { placeholder: 'lihuaitian25' }) }),
+            renderField({ label: '跳板用户', tip: '跳板机登录用户名。', control: inputControl('ssh.bastion_user', container.ssh.bastion_user, { placeholder: 'admin' }) }),
             renderField({ label: '目标用户', tip: '最终连接容器宿主机时使用的用户名。', control: inputControl('ssh.target_user', container.ssh.target_user, { placeholder: 'root' }) }),
             renderField({ label: 'SSH 端口', tip: '外层 SSH 端口。', control: inputControl('ssh.port', container.ssh.port, { type: 'number', placeholder: '22' }) }),
             renderField({ label: '容器 SSH 端口', tip: '内层容器侧 SSH 端口。', control: inputControl('ssh.container_port', container.ssh.container_port, { type: 'number', placeholder: '22' }) }),
