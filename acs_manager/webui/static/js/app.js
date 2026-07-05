@@ -474,7 +474,7 @@
   function renderTaskEditor(task = {}, idx = 0) {
     const card = document.createElement('div');
     const runner = task.runner || {};
-    const runnerType = runner.type === 'tmux' ? 'screen' : (runner.type || 'nohup');
+    const runnerType = ['screen', 'tmux', 'nohup', 'shell'].includes(runner.type) ? runner.type : 'nohup';
     card.className = 'rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 space-y-3';
     card.dataset.kind = 'task';
     card.dataset.taskIndex = String(idx);
@@ -510,6 +510,7 @@
           <select class="input" data-field="task_runner_type">
             <option value="nohup" ${runnerType === 'nohup' ? 'selected' : ''}>nohup</option>
             <option value="screen" ${runnerType === 'screen' ? 'selected' : ''}>screen</option>
+            <option value="tmux" ${runnerType === 'tmux' ? 'selected' : ''}>tmux</option>
             <option value="shell" ${runnerType === 'shell' ? 'selected' : ''}>shell</option>
           </select>
         </label>

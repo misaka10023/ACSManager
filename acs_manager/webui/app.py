@@ -131,6 +131,9 @@ def _run_git(args: list[str], cwd: Path) -> str:
 
 
 def _check_update(repo_root: Path) -> int:
+    dirty = _run_git(["git", "status", "--porcelain"], repo_root)
+    if dirty:
+        raise RuntimeError("Working tree has local changes; commit or stash them before using Web UI update.")
     _run_git(["git", "fetch", "--prune"], repo_root)
     upstream = _run_git(["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], repo_root)
     behind = _run_git(["git", "rev-list", "--count", f"HEAD..{upstream}"], repo_root)

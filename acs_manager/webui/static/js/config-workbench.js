@@ -146,7 +146,7 @@ window.ConfigWorkbench = (() => {
     const raw = task && typeof task === 'object' ? deepClone(task) : {};
     const id = slugify(raw.id || raw.title, `task-${index + 1}`);
     const runnerRaw = raw.runner && typeof raw.runner === 'object' ? raw.runner : {};
-    const runnerType = runnerRaw.type === 'tmux' ? 'screen' : (runnerRaw.type || 'nohup');
+    const runnerType = ['screen', 'tmux', 'nohup', 'shell'].includes(runnerRaw.type) ? runnerRaw.type : 'nohup';
     return {
       id,
       title: String(raw.title || id),
@@ -647,8 +647,8 @@ window.ConfigWorkbench = (() => {
             ${renderField({ label: '启用任务', tip: '关闭后不会自动执行，也不建议在仪表盘手动执行。', control: `<label class="toggle-row"><input type="checkbox" class="checkbox" data-task-field="enabled" ${task.enabled ? 'checked' : ''}><span>任务可用</span></label>` })}
             ${renderField({ label: '触发方式', tip: 'manual 仅手动执行；auto_on_start 会在容器 Running 后自动尝试。', control: `<select class="input" data-task-field="trigger"><option value="manual" ${task.trigger === 'manual' ? 'selected' : ''}>manual</option><option value="auto_on_start" ${task.trigger === 'auto_on_start' ? 'selected' : ''}>auto_on_start</option></select>` })}
             ${renderField({ label: '运行模式', tip: 'ensure_running 适合常驻服务；once 适合一次性脚本。', control: `<select class="input" data-task-field="mode"><option value="once" ${task.mode === 'once' ? 'selected' : ''}>once</option><option value="ensure_running" ${task.mode === 'ensure_running' ? 'selected' : ''}>ensure_running</option></select>` })}
-            ${renderField({ label: '运行器', tip: 'screen 适合常驻服务；nohup 适合后台一次性脚本；shell 会同步等待命令结束。', control: `<select class="input" data-task-field="runner.type"><option value="screen" ${runnerType === 'screen' ? 'selected' : ''}>screen</option><option value="nohup" ${runnerType === 'nohup' ? 'selected' : ''}>nohup</option><option value="shell" ${runnerType === 'shell' ? 'selected' : ''}>shell</option></select>` })}
-            ${renderField({ label: 'Screen Session', tip: 'screen 运行器下用于去重和手动 attach；其他运行器可留空。', control: `<input type="text" class="input" data-task-field="runner.session" value="${escapeHtml(task.runner?.session || '')}" placeholder="comfyui">` })}
+            ${renderField({ label: '运行器', tip: 'screen/tmux 适合常驻服务；nohup 适合后台一次性脚本；shell 会同步等待命令结束。', control: `<select class="input" data-task-field="runner.type"><option value="screen" ${runnerType === 'screen' ? 'selected' : ''}>screen</option><option value="tmux" ${runnerType === 'tmux' ? 'selected' : ''}>tmux</option><option value="nohup" ${runnerType === 'nohup' ? 'selected' : ''}>nohup</option><option value="shell" ${runnerType === 'shell' ? 'selected' : ''}>shell</option></select>` })}
+            ${renderField({ label: 'Session', tip: 'screen/tmux 运行器下用于去重和手动 attach；其他运行器可留空。', control: `<input type="text" class="input" data-task-field="runner.session" value="${escapeHtml(task.runner?.session || '')}" placeholder="comfyui">` })}
             ${renderField({ label: '工作目录', tip: '执行命令前切换到此目录。', control: `<input type="text" class="input" data-task-field="workdir" value="${escapeHtml(task.workdir)}" placeholder="/workspace/project">` })}
             ${renderField({ label: '日志文件', tip: '若填写，输出会被重定向到该文件。', control: `<input type="text" class="input" data-task-field="log_file" value="${escapeHtml(task.log_file)}" placeholder="/workspace/logs/task.log">`, span: 2 })}
             ${renderField({ label: '命令', tip: '实际通过 SSH 在容器内执行的命令。', control: `<textarea class="input input-area" data-task-field="command" placeholder="python main.py --listen 0.0.0.0 --port 8188">${escapeHtml(task.command)}</textarea>`, span: 3 })}

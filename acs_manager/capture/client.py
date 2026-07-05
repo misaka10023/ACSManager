@@ -26,7 +26,7 @@ class CaptureClient:
 
     def get_container_ips(self, instance_id: str) -> Dict[str, Any]:
         self.ensure_login()
-        return self.container_client.get_instance_ips(instance_id)
+        return self.container_client.get_run_ips(instance_id)
 
     def get_container_ip_by_name(self, name: str) -> str:
         self.ensure_login()

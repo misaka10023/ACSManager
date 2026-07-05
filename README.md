@@ -94,8 +94,9 @@ copy config\examples\settings.example.yaml config\local\settings.yaml
 
 - `trigger: manual`：只允许手动触发。
 - `trigger: auto_on_start`：容器进入运行状态后自动触发。
-- `runner.type` 支持 `shell`、`screen`、`nohup`。
-- 常驻服务建议使用 `screen`，一次性训练任务可使用 `nohup` 或 `shell`。
+- `runner.type` 支持 `shell`、`screen`、`tmux`、`nohup`。
+- 常驻服务建议使用 `screen` 或 `tmux`，一次性训练任务可使用 `nohup` 或 `shell`。
+- `screen`/`tmux` 模式需要容器内已安装对应命令；任务退出后会保留可 attach 的会话，并通过运行标记判断命令是否仍在执行。
 
 ## 网页界面
 
@@ -122,7 +123,7 @@ copy config\examples\settings.example.yaml config\local\settings.yaml
 - `POST /containers/{id}/restart-container`：按策略重启、重建或跳过容器操作。
 - `POST /containers/{id}/tasks/{task_id}/run`：手动执行容器任务。
 - `GET /logs?lines=N`：读取最近 N 行日志。
-- `POST /update`：检查 Git 更新，存在新版本时拉取并重启。
+- `POST /update`：检查 Git 更新，存在新版本时拉取并重启；本地工作区有未提交改动时会失败。
 
 ## 部署说明
 

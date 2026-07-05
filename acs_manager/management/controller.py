@@ -111,9 +111,7 @@ class ContainerManager:
                 mode = "once"
             runner_raw = raw.get("runner", {}) if isinstance(raw.get("runner"), dict) else {}
             runner_type = str(runner_raw.get("type") or ("screen" if mode == "ensure_running" else "nohup")).strip().lower()
-            if runner_type == "tmux":
-                runner_type = "screen"
-            if runner_type not in {"screen", "nohup", "shell"}:
+            if runner_type not in {"screen", "tmux", "nohup", "shell"}:
                 runner_type = "nohup"
             session_name = str(runner_raw.get("session") or task_id).strip() or task_id
             normalized.append(
@@ -741,7 +739,19 @@ class ContainerManager:
             "command": cmd,
         }
 
-    def _task_session_exists(self, session_name: str) -> bool:
+    @staticmethod
+    def _tmux_target(session_name: str) -> str:
+        return f"={session_name}"
+
+    def _task_session_exists(self, runner_type: str, session_name: str) -> bool:
+        if runner_type == "tmux":
+            probe = self._run_remote_shell(
+                f"tmux has-session -t {shlex.quote(self._tmux_target(session_name))} >/dev/null 2>&1",
+                timeout=20,
+                reload_config=False,
+                allowed_returncodes={0, 1},
+            )
+            return probe.get("returncode") == 0
         probe = self._run_remote_shell(
             f"screen -ls | grep -Fq {shlex.quote('.' + session_name)}",
             timeout=20,
@@ -750,30 +760,51 @@ class ContainerManager:
         )
         return probe.get("returncode") == 0
 
-    def _task_screen_marker_path(self, task_id: str) -> str:
+    def _task_runner_marker_path(self, task_id: str) -> str:
         container_key = self._slugify_task_id(self.container_id, "container")
         task_key = self._slugify_task_id(task_id, "task")
         return f"/tmp/acs-manager-{container_key}-{task_key}.running"
 
-    def _task_screen_is_running(self, session_name: str, marker_path: str) -> bool:
+    def _task_persistent_runner_is_running(self, runner_type: str, session_name: str, marker_path: str) -> bool:
+        if runner_type == "tmux":
+            probe_command = (
+                f"tmux has-session -t {shlex.quote(self._tmux_target(session_name))} >/dev/null 2>&1 "
+                f"&& [ -f {shlex.quote(marker_path)} ]"
+            )
+        else:
+            probe_command = f"screen -ls | grep -Fq {shlex.quote('.' + session_name)} && [ -f {shlex.quote(marker_path)} ]"
         probe = self._run_remote_shell(
-            f"screen -ls | grep -Fq {shlex.quote('.' + session_name)} && [ -f {shlex.quote(marker_path)} ]",
+            probe_command,
             timeout=20,
             reload_config=False,
             allowed_returncodes={0, 1},
         )
         return probe.get("returncode") == 0
 
-    def _reset_task_screen_session(self, session_name: str, marker_path: str) -> None:
-        self._run_remote_shell(
-            (
+    def _reset_task_persistent_session(self, runner_type: str, session_name: str, marker_path: str) -> None:
+        if runner_type == "tmux":
+            reset_command = (
+                f"tmux kill-session -t {shlex.quote(self._tmux_target(session_name))} >/dev/null 2>&1 || true; "
+                f"rm -f {shlex.quote(marker_path)} >/dev/null 2>&1 || true"
+            )
+        else:
+            reset_command = (
                 f"screen -S {shlex.quote(session_name)} -X quit >/dev/null 2>&1 || true; "
                 f"rm -f {shlex.quote(marker_path)} >/dev/null 2>&1 || true"
-            ),
+            )
+        self._run_remote_shell(
+            reset_command,
             timeout=20,
             reload_config=False,
             allowed_returncodes={0},
         )
+
+    @staticmethod
+    def _persistent_runner_start_command(runner_type: str, session_name: str, wrapped_launch: str) -> str:
+        if runner_type == "tmux":
+            shell_command = f"bash -lc {shlex.quote(wrapped_launch)}"
+            return f"tmux new-session -d -s {shlex.quote(session_name)} {shlex.quote(shell_command)}"
+        return f"screen -dmS {shlex.quote(session_name)} bash -lc {shlex.quote(wrapped_launch)}"
 
     def _execute_task_sync(self, task: Dict[str, Any], *, force: bool = False, reason: str = "manual") -> Dict[str, Any]:
         task_id = task["id"]
@@ -793,11 +824,11 @@ class ContainerManager:
         shell_body = self._task_shell_body(task)
         log_file = str(task.get("log_file") or "").strip()
 
-        if runner == "screen":
-            marker_path = self._task_screen_marker_path(task_id)
+        if runner in {"screen", "tmux"}:
+            marker_path = self._task_runner_marker_path(task_id)
             if force:
-                self._reset_task_screen_session(session_name, marker_path)
-            elif self._task_screen_is_running(session_name, marker_path):
+                self._reset_task_persistent_session(runner, session_name, marker_path)
+            elif self._task_persistent_runner_is_running(runner, session_name, marker_path):
                 result = {
                     "success": True,
                     "status": "already_running",
@@ -813,10 +844,10 @@ class ContainerManager:
                     },
                 )
                 return result
-            elif self._task_session_exists(session_name):
+            elif self._task_session_exists(runner, session_name):
                 # Keep an attachable shell after the managed command exits, but
                 # reset any leftover shell before starting a new managed run.
-                self._reset_task_screen_session(session_name, marker_path)
+                self._reset_task_persistent_session(runner, session_name, marker_path)
 
             launch = shell_body
             if log_file:
@@ -831,10 +862,10 @@ class ContainerManager:
                 f"printf '\\n[acs-manager] task exited with code %s\\n' \"$status\"; "
                 f"exec bash -i"
             )
-            remote_command = f"screen -dmS {shlex.quote(session_name)} bash -lc {shlex.quote(wrapped_launch)}"
+            remote_command = self._persistent_runner_start_command(runner, session_name, wrapped_launch)
             outcome = self._run_remote_shell(remote_command, timeout=30, reload_config=False)
             success = bool(outcome.get("ok"))
-            message = f"Task {task['title']} started in screen session {session_name}." if success else (
+            message = f"Task {task['title']} started in {runner} session {session_name}." if success else (
                 outcome.get("stderr") or outcome.get("stdout") or f"Failed to start task {task['title']}."
             )
             self._persist_task_state(
