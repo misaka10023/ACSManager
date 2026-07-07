@@ -7,6 +7,7 @@ import copy
 import datetime as dt
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -180,12 +181,17 @@ def bind_config_store(store: ConfigStore) -> None:
 
 
 def _warn_if_default_secret() -> None:
-    """Log an error when WebUI auth is enabled with an empty or default placeholder secret_key."""
+    """Log auth risks that would make protected WebUI actions unsafe."""
     try:
         auth_cfg = _auth_settings(reload=True)
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("Unable to inspect auth settings for secret check: %s", exc)
         return
+    if _auth_disabled_on_public_bind(auth_cfg, reload=False):
+        logger.error(
+            "WebUI auth is disabled while webui.host is bound to a non-loopback address; "
+            "protected APIs are blocked. Enable webui.auth or bind webui.host to 127.0.0.1."
+        )
     secret_key = auth_cfg.get("secret_key")
     secret_value = secret_key if isinstance(secret_key, str) else ""
     is_blank = not secret_value.strip()
@@ -248,6 +254,38 @@ def _auth_settings(reload: bool = False) -> Dict[str, Any]:
     return defaults
 
 
+def _webui_bind_host(reload: bool = False) -> str:
+    if config_store:
+        try:
+            webui_cfg = config_store.get_section("webui", default={}, reload=reload)
+            if isinstance(webui_cfg, dict):
+                return str(webui_cfg.get("host") or "127.0.0.1").strip() or "127.0.0.1"
+        except Exception as exc:
+            logger.warning("Failed to load webui host config: %s", exc)
+    return "127.0.0.1"
+
+
+def _is_loopback_bind_host(host: str) -> bool:
+    normalized = str(host or "").strip().lower()
+    if normalized in {"localhost", "127.0.0.1", "::1"}:
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _auth_disabled_on_public_bind(auth_cfg: Dict[str, Any], *, reload: bool = False) -> bool:
+    return not auth_cfg.get("enabled") and not _is_loopback_bind_host(_webui_bind_host(reload=reload))
+
+
+def _auth_disabled_public_detail() -> str:
+    return (
+        "Web UI auth is disabled while webui.host is not loopback; "
+        "enable webui.auth or bind webui.host to 127.0.0.1."
+    )
+
+
 def _verify_password(input_pw: str, auth_cfg: Dict[str, Any]) -> bool:
     stored_hash = (auth_cfg.get("password_hash") or "").strip()
     stored_pw = (auth_cfg.get("password") or "").strip()
@@ -293,6 +331,8 @@ def _current_user(request: Request, auth_cfg: Dict[str, Any]) -> Optional[str]:
 def require_auth(request: Request) -> str:
     auth_cfg = _auth_settings(reload=False)
     if not auth_cfg.get("enabled"):
+        if _auth_disabled_on_public_bind(auth_cfg, reload=False):
+            raise HTTPException(status_code=403, detail=_auth_disabled_public_detail())
         return ""
     user = _current_user(request, auth_cfg)
     if not user:
@@ -302,6 +342,8 @@ def require_auth(request: Request) -> str:
 
 def _maybe_redirect_login(request: Request, auth_cfg: Dict[str, Any]) -> Optional[RedirectResponse]:
     if not auth_cfg.get("enabled"):
+        if _auth_disabled_on_public_bind(auth_cfg, reload=False):
+            raise HTTPException(status_code=403, detail=_auth_disabled_public_detail())
         return None
     user = _current_user(request, auth_cfg)
     if user:
@@ -463,6 +505,81 @@ def _normalize_container_editor(container: Any, idx: int = 0) -> Dict[str, Any]:
     return editor
 
 
+def _task_runtime_fields_for_validation(task: Any, idx: int) -> Dict[str, Any]:
+    raw = copy.deepcopy(task) if isinstance(task, dict) else {}
+    fallback_id = f"task-{idx + 1}"
+    title = str(raw.get("title") or raw.get("name") or raw.get("id") or fallback_id).strip()
+    task_id = ContainerManager._slugify_task_id(raw.get("id") or title, fallback_id)
+    trigger = str(raw.get("trigger") or "manual").strip().lower()
+    if trigger not in {"manual", "auto_on_start"}:
+        trigger = "manual"
+    mode = str(raw.get("mode") or "once").strip().lower()
+    if mode not in {"once", "ensure_running"}:
+        mode = "once"
+    runner_raw = raw.get("runner", {}) if isinstance(raw.get("runner"), dict) else {}
+    default_runner = "screen" if mode == "ensure_running" else "nohup"
+    runner_type = str(runner_raw.get("type") or default_runner).strip().lower()
+    if runner_type not in {"screen", "tmux", "nohup", "shell"}:
+        runner_type = default_runner
+    session_name = str(runner_raw.get("session") or task_id).strip() or task_id
+    return {
+        "id": task_id,
+        "title": title or task_id,
+        "enabled": bool(raw.get("enabled", True)),
+        "trigger": trigger,
+        "mode": mode,
+        "runner_type": runner_type,
+        "session": session_name,
+    }
+
+
+def _validate_container_tasks(container: Dict[str, Any]) -> None:
+    container_name = str(container.get("name") or container.get("id") or "container")
+    tasks = container.get("tasks") if isinstance(container.get("tasks"), list) else []
+    persistent_sessions: Dict[tuple[str, str], str] = {}
+    for idx, raw_task in enumerate(tasks):
+        task = _task_runtime_fields_for_validation(raw_task, idx)
+        if not task["enabled"]:
+            continue
+        if task["mode"] == "ensure_running" and task["runner_type"] not in {"screen", "tmux"}:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Container {container_name} task {task['id']} uses mode ensure_running with "
+                    f"runner {task['runner_type']}; use screen or tmux."
+                ),
+            )
+        if task["trigger"] == "auto_on_start" and task["runner_type"] == "shell":
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Container {container_name} task {task['id']} uses shell runner with "
+                    "auto_on_start; use screen, tmux, or nohup."
+                ),
+            )
+        if task["runner_type"] in {"screen", "tmux"}:
+            key = (task["runner_type"], task["session"])
+            previous = persistent_sessions.get(key)
+            if previous:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Container {container_name} tasks {previous} and {task['id']} share "
+                        f"{task['runner_type']} session {task['session']}; sessions must be unique."
+                    ),
+                )
+            persistent_sessions[key] = task["id"]
+
+
+def _validate_root_config(root: Dict[str, Any]) -> None:
+    containers = root.get("containers") or []
+    if not isinstance(containers, list):
+        return
+    for item in containers:
+        if isinstance(item, dict):
+            _validate_container_tasks(item)
+
+
 def _compact_container_for_root(container: Any, idx: int = 0) -> Dict[str, Any]:
     editor = _normalize_container_editor(container, idx)
     return {
@@ -528,7 +645,9 @@ def _clone_container_name(existing_ids: List[str], base_name: str) -> str:
 
 async def _persist_root_config(old_cfg: Dict[str, Any], root: Dict[str, Any]) -> Dict[str, Any]:
     store = _ensure_config_store()
-    new_cfg = store.write(_normalize_root_config(root))
+    normalized = _normalize_root_config(root)
+    _validate_root_config(normalized)
+    new_cfg = store.write(normalized)
     await _post_config_change(old_cfg, new_cfg)
     return new_cfg
 
@@ -1093,6 +1212,8 @@ async def update_app(user: str = Depends(require_auth)) -> dict:
 def ui_login(request: Request) -> HTMLResponse:
     auth_cfg = _auth_settings()
     if not auth_cfg.get("enabled"):
+        if _auth_disabled_on_public_bind(auth_cfg, reload=False):
+            raise HTTPException(status_code=403, detail=_auth_disabled_public_detail())
         return RedirectResponse(url=request.url_for("ui_dashboard"))
     if _current_user(request, auth_cfg):
         return RedirectResponse(url=request.url_for("ui_dashboard"), status_code=303)
@@ -1117,6 +1238,8 @@ def ui_login_submit(
 ) -> HTMLResponse:
     auth_cfg = _auth_settings()
     if not auth_cfg.get("enabled"):
+        if _auth_disabled_on_public_bind(auth_cfg, reload=False):
+            raise HTTPException(status_code=403, detail=_auth_disabled_public_detail())
         return RedirectResponse(url=request.url_for("ui_dashboard"), status_code=303)
 
     if hmac.compare_digest(username, auth_cfg.get("username", "")) and _verify_password(password, auth_cfg):

@@ -64,16 +64,16 @@ containers:
 #        title: "启动 ComfyUI"            # 仪表盘展示名称
 #        enabled: true                   # 是否启用该任务
 #        trigger: "auto_on_start"        # auto_on_start|manual
-#        mode: "ensure_running"          # ensure_running|once
+#        mode: "ensure_running"          # ensure_running|once；ensure_running 只支持 screen/tmux
 #        workdir: "/workspace/ComfyUI"   # 远端执行前切换到的目录
 #        command: "python main.py --listen 0.0.0.0 --port 8188"  # 实际执行命令
 #        log_file: "/workspace/logs/comfyui.log" # 可选日志文件
 #        runner:
-#          type: "screen"                # screen|tmux|nohup|shell
-#          session: "comfyui"            # screen/tmux session 名；screen/tmux 模式建议填写
+#          type: "screen"                # screen|tmux|nohup|shell；auto_on_start 不支持 shell
+#          session: "comfyui"            # screen/tmux session 名；同一容器内需唯一
 
 webui:
-  host: "0.0.0.0"                        # Web UI 绑定地址
+  host: "127.0.0.1"                      # Web UI 绑定地址；对外开放请同时启用 auth
   port: 8000                             # Web UI 端口
   root_path: ""                          # 部署在子路径时填写前缀，如 /acsmanager
   auth:

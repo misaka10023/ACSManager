@@ -97,6 +97,8 @@ copy config\examples\settings.example.yaml config\local\settings.yaml
 - `runner.type` 支持 `shell`、`screen`、`tmux`、`nohup`。
 - 常驻服务建议使用 `screen` 或 `tmux`，一次性训练任务可使用 `nohup` 或 `shell`。
 - `screen`/`tmux` 模式需要容器内已安装对应命令；任务退出后会保留可 attach 的会话，并通过运行标记判断命令是否仍在执行。
+- `mode: ensure_running` 只支持 `screen` 或 `tmux`，监控循环会持续检查运行标记，命令退出后会自动重新拉起。
+- 同一容器内启用的 `screen`/`tmux` 任务不能共用同一个 session；`auto_on_start` 不支持 `shell` runner。
 
 ## 网页界面
 
@@ -127,7 +129,9 @@ copy config\examples\settings.example.yaml config\local\settings.yaml
 
 ## 部署说明
 
-直接本机访问时，使用 `webui.host` 和 `webui.port` 对应地址。
+直接本机访问时，使用 `webui.host` 和 `webui.port` 对应地址。默认 `webui.host` 为 `127.0.0.1`。
+
+如果将 `webui.host` 绑定到 `0.0.0.0`、局域网 IP 或公网 IP，必须启用 `webui.auth`；否则受保护的 UI/API 会返回 403，避免配置写入和任务执行接口暴露到网络。
 
 如果通过 Nginx 反向代理到子路径，建议同时配置：
 

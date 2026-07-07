@@ -23,7 +23,7 @@ TEMPLATE_CONFIG = "config/examples/settings.example.yaml"
 
 
 async def start_web_ui(web_cfg: dict[str, Any]) -> None:
-    host = web_cfg.get("host", "0.0.0.0")
+    host = web_cfg.get("host", "127.0.0.1")
     port = int(web_cfg.get("port", 8000))
     log_level = web_cfg.get("log_level", "info")
     config = uvicorn.Config(

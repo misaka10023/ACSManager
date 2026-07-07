@@ -110,9 +110,10 @@ class ContainerManager:
             if mode not in {"once", "ensure_running"}:
                 mode = "once"
             runner_raw = raw.get("runner", {}) if isinstance(raw.get("runner"), dict) else {}
-            runner_type = str(runner_raw.get("type") or ("screen" if mode == "ensure_running" else "nohup")).strip().lower()
+            default_runner = "screen" if mode == "ensure_running" else "nohup"
+            runner_type = str(runner_raw.get("type") or default_runner).strip().lower()
             if runner_type not in {"screen", "tmux", "nohup", "shell"}:
-                runner_type = "nohup"
+                runner_type = default_runner
             session_name = str(runner_raw.get("session") or task_id).strip() or task_id
             normalized.append(
                 {
@@ -606,6 +607,22 @@ class ContainerManager:
             return f"cd {shlex.quote(workdir)} && {command}"
         return command
 
+    @staticmethod
+    def _validate_task_execution(task: Dict[str, Any], *, reason: str) -> None:
+        title = task.get("title") or task.get("id") or "task"
+        mode = str(task.get("mode") or "once").strip().lower()
+        runner = str((task.get("runner") or {}).get("type") or "").strip().lower()
+        if mode == "ensure_running" and runner not in {"screen", "tmux"}:
+            raise ValueError(
+                f"Task {title} uses mode ensure_running with runner {runner or 'unknown'}; "
+                "use screen or tmux so ACS Manager can check the running marker."
+            )
+        if reason == "auto_on_start" and runner == "shell":
+            raise ValueError(
+                f"Task {title} uses shell runner with auto_on_start; "
+                "use screen, tmux, or nohup so the monitor loop is not blocked."
+            )
+
     def _ssh_keepalive_options(self, ssh_cfg: Dict[str, Any]) -> List[str]:
         """Build the standard SSH keepalive option list.
 
@@ -807,6 +824,7 @@ class ContainerManager:
         return f"screen -dmS {shlex.quote(session_name)} bash -lc {shlex.quote(wrapped_launch)}"
 
     def _execute_task_sync(self, task: Dict[str, Any], *, force: bool = False, reason: str = "manual") -> Dict[str, Any]:
+        self._validate_task_execution(task, reason=reason)
         task_id = task["id"]
         runner = task["runner"]["type"]
         session_name = task["runner"]["session"]
@@ -960,20 +978,30 @@ class ContainerManager:
             or self.state.get("container_ip")
             or ""
         ).strip()
-        if not marker:
-            return
         for task in self._task_cfgs(reload=True):
             if not task.get("enabled", True) or task.get("trigger") != "auto_on_start":
                 continue
+            mode = str(task.get("mode") or "once").strip().lower()
             state = self._task_state(task["id"])
-            if state.get("last_auto_marker") == marker:
+            if mode != "ensure_running" and not marker:
+                continue
+            if mode != "ensure_running" and state.get("last_auto_marker") == marker:
                 continue
             try:
                 result = await self.execute_task(task["id"], force=False, reason="auto_on_start")
             except Exception as exc:
                 logger.error("Auto task %s failed for %s: %s", task["id"], self.container_id, exc)
+                self._persist_task_state(
+                    task["id"],
+                    {
+                        "last_status": "failed",
+                        "last_reason": "auto_on_start",
+                        "last_run_at": dt.datetime.now().isoformat(),
+                        "last_message": self._trim_task_output(str(exc)),
+                    },
+                )
                 continue
-            if result.get("success"):
+            if result.get("success") and marker:
                 self._persist_task_state(
                     task["id"],
                     {

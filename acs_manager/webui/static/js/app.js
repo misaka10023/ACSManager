@@ -527,7 +527,7 @@
           <textarea class="input min-h-28" data-field="task_command" placeholder="如：python main.py --listen 0.0.0.0 --port 8188">${escapeHtml(task.command || '')}</textarea>
         </label>
       </div>
-      <div class="text-[11px] text-slate-500">auto_on_start 会在容器进入 Running 后自动尝试执行；ensure_running + screen 适合常驻服务。</div>
+      <div class="text-[11px] text-slate-500">auto_on_start 会在容器进入 Running 后自动尝试执行，不能使用 shell；ensure_running 只支持 screen/tmux，且同一容器内 session 需唯一。</div>
     `;
     return card;
   }
