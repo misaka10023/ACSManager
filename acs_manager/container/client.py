@@ -277,6 +277,10 @@ class ContainerClient:
     def _service_type(self, *, reload: bool = False) -> str:
         return str(self._acs_cfg(reload=reload).get("service_type") or "container").strip().lower()
 
+    def configured_notebook_id(self, *, reload: bool = False) -> str:
+        """Return the persisted Notebook record ID, if configured."""
+        return str(self._acs_cfg(reload=reload).get("notebook_id") or "").strip()
+
     @staticmethod
     def _task_items(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         data = payload.get("data") if isinstance(payload, dict) else None
@@ -318,16 +322,13 @@ class ContainerClient:
         self,
         name: str,
         sources: List[tuple[str, List[Dict[str, Any]], tuple[str, ...]]],
+        *,
+        allow_fuzzy: bool = True,
     ) -> Optional[Dict[str, Any]]:
-        """
-        按名称匹配任务，返回“最新”的一条匹配记录。
-
-        匹配规则：
-        - 先筛出名称完全相等的任务（instanceServiceName/taskName/notebookName/name 中任一等于目标）；
-        - 若没有完全相等，再从“前缀/包含”匹配的候选中挑选；
-        - 在候选集中按 startTime/createTime 解析后的时间排序，返回最新一条。
-        """
+        """Return the newest exact match, optionally falling back to fuzzy candidates."""
         target = name.strip().lower()
+        if not target:
+            return None
         for source_name, items, name_keys in sources:
             if not items:
                 continue
@@ -339,8 +340,13 @@ class ContainerClient:
                     cand_l = cand.lower()
                     if not cand:
                         continue
+                    if cand_l == target:
+                        exact.append(item)
+                        break
+                    if not allow_fuzzy:
+                        continue
                     alias = re.sub(r"_\d+$", "", cand_l) if source_name == "notebook" else cand_l
-                    if cand_l == target or alias == target:
+                    if alias == target:
                         exact.append(item)
                         break
                     if cand_l.startswith(target) or alias.startswith(target) or target in cand_l:
@@ -354,42 +360,40 @@ class ContainerClient:
     def find_instance_by_name(self, name: str, *, start: int = 0, limit: int = 200) -> Optional[Dict[str, Any]]:
         service_type = self._service_type(reload=False)
         if service_type == "notebook":
-            try:
-                notebook_items = self._task_items(self.list_notebook_tasks(start=start, limit=limit))
-            except Exception:
-                notebook_items = []
+            notebook_items = self._task_items(self.list_notebook_tasks(start=start, limit=limit))
             sources = [("notebook", notebook_items, ("notebookName", "taskName", "name"))]
-            return self._match_instance_from_sources(name, sources)
+            return self._match_instance_from_sources(name, sources, allow_fuzzy=False)
 
-        try:
-            container_items = self._task_items(self.list_tasks(start=start, limit=limit))
-        except Exception:
-            container_items = []
+        container_items = self._task_items(self.list_tasks(start=start, limit=limit))
         sources = [("container", container_items, ("instanceServiceName", "taskName", "notebookName", "name"))]
         return self._match_instance_from_sources(name, sources)
 
     def find_notebook_task_by_name(self, name: str, *, start: int = 0, limit: int = 200) -> Optional[Dict[str, Any]]:
         """Match only Notebook service records."""
-        try:
-            notebook_items = self._task_items(self.list_notebook_tasks(start=start, limit=limit, keyword=name))
-        except Exception:
-            notebook_items = []
+        notebook_items = self._task_items(self.list_notebook_tasks(start=start, limit=limit, keyword=name))
         sources = [("notebook", notebook_items, ("notebookName", "taskName", "name"))]
-        return self._match_instance_from_sources(name, sources)
+        return self._match_instance_from_sources(name, sources, allow_fuzzy=False)
 
     def find_container_task_by_name(self, name: str, *, start: int = 0, limit: int = 200) -> Optional[Dict[str, Any]]:
         """Match only instance-service/container records to recover restartable service IDs."""
-        try:
-            container_items = self._task_items(self.list_tasks(start=start, limit=limit))
-        except Exception:
-            container_items = []
+        container_items = self._task_items(self.list_tasks(start=start, limit=limit))
         sources = [("container", container_items, ("instanceServiceName", "taskName", "notebookName", "name"))]
         return self._match_instance_from_sources(name, sources)
 
-    def list_task_suggestions(self, *, limit: int = 200) -> List[Dict[str, Any]]:
+    def list_task_suggestions(
+        self,
+        *,
+        limit: int = 200,
+        service_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """Return merged task suggestions for Web UI autocomplete."""
+        requested_type = str(service_type or "").strip().lower()
+        if requested_type not in {"", "container", "notebook"}:
+            raise ValueError(f"Unsupported ACS service type: {service_type}")
         suggestions: List[Dict[str, Any]] = []
         seen: set[tuple[str, str, str]] = set()
+        errors: List[Exception] = []
+        successful_sources = 0
 
         def _append(items: List[Dict[str, Any]], service_type: str, *name_keys: str) -> None:
             for item in items:
@@ -413,39 +417,48 @@ class ContainerClient:
                     }
                 )
 
-        try:
-            _append(
-                self._task_items(self.list_tasks(start=0, limit=limit, sort="DESC")),
-                "container",
-                "instanceServiceName",
-                "taskName",
-                "notebookName",
-                "name",
-            )
-        except Exception:
-            pass
-        try:
-            _append(
-                self._task_items(self.list_notebook_tasks(start=0, limit=limit, sort="DESC")),
-                "notebook",
-                "notebookName",
-                "taskName",
-                "name",
-            )
-        except Exception:
-            pass
+        if requested_type in {"", "container"}:
+            try:
+                _append(
+                    self._task_items(self.list_tasks(start=0, limit=limit, sort="DESC")),
+                    "container",
+                    "instanceServiceName",
+                    "taskName",
+                    "notebookName",
+                    "name",
+                )
+                successful_sources += 1
+            except Exception as exc:
+                errors.append(exc)
+        if requested_type in {"", "notebook"}:
+            try:
+                _append(
+                    self._task_items(self.list_notebook_tasks(start=0, limit=limit, sort="DESC")),
+                    "notebook",
+                    "notebookName",
+                    "taskName",
+                    "name",
+                )
+                successful_sources += 1
+            except Exception as exc:
+                errors.append(exc)
+        if successful_sources == 0 and errors:
+            raise errors[0]
         suggestions.sort(key=self._parse_task_time, reverse=True)
         return suggestions
 
     def _get_notebook_instance_info(self, task: Dict[str, Any], notebook_id: str) -> Dict[str, Any]:
+        errors: List[Exception] = []
+        successful_requests = 0
         detail_data: Optional[Dict[str, Any]] = None
         try:
             detail = self.get_notebook_record_detail(notebook_id)
+            successful_requests += 1
             raw = detail.get("data") if isinstance(detail, dict) else None
             if isinstance(raw, dict) and raw:
                 detail_data = raw
-        except Exception:
-            detail_data = None
+        except Exception as exc:
+            errors.append(exc)
 
         source_task = detail_data or task
         info: Dict[str, Any] = {}
@@ -453,12 +466,25 @@ class ContainerClient:
         monitor_data: Optional[Dict[str, Any]] = None
         try:
             monitor = self.get_notebook_monitor(notebook_id)
+            successful_requests += 1
             raw = monitor.get("data") if isinstance(monitor, dict) else None
             if isinstance(raw, dict) and raw:
                 monitor_data = raw
                 info.update(raw)
-        except Exception:
-            monitor_data = None
+        except Exception as exc:
+            errors.append(exc)
+
+        candidate_ip: Optional[str] = None
+        ip_source: Optional[str] = None
+        for payload, source in (
+            (monitor_data, "api.notebook.monitor"),
+            (source_task, "api.notebook.detail"),
+            (task, "api.notebook.list"),
+        ):
+            candidate_ip = self._extract_ip_candidate(payload)
+            if candidate_ip:
+                ip_source = source
+                break
 
         runtime_task_id = str(
             source_task.get("instanceId")
@@ -467,28 +493,45 @@ class ContainerClient:
         ).strip()
         runtime_detail: Optional[Dict[str, Any]] = None
         instance_data: Optional[Dict[str, Any]] = None
-        if runtime_task_id:
+        if runtime_task_id and not candidate_ip:
             try:
                 runtime = self.get_notebook_task_detail(runtime_task_id)
+                successful_requests += 1
                 raw = runtime.get("data") if isinstance(runtime, dict) else None
                 if isinstance(raw, dict) and raw:
                     runtime_detail = raw
-            except Exception:
-                runtime_detail = None
+                    candidate_ip = self._extract_ip_candidate(raw)
+                    if candidate_ip:
+                        ip_source = "api.notebook.runtime"
+            except Exception as exc:
+                errors.append(exc)
 
-            for container_type in ("worker", "ps"):
-                try:
-                    instance = self.get_task_instance(runtime_task_id, container_type=container_type, container_index=0)
-                except Exception:
-                    continue
-                raw = instance.get("data") if isinstance(instance, dict) else None
-                if isinstance(raw, dict) and raw:
-                    instance_data = raw
-                    info.update(raw)
-                    info["containerType"] = raw.get("containerType") or container_type
-                    break
+            if not candidate_ip:
+                for container_type in ("worker", "ps"):
+                    try:
+                        instance = self.get_task_instance(
+                            runtime_task_id,
+                            container_type=container_type,
+                            container_index=0,
+                        )
+                        successful_requests += 1
+                    except Exception as exc:
+                        errors.append(exc)
+                        continue
+                    raw = instance.get("data") if isinstance(instance, dict) else None
+                    if isinstance(raw, dict) and raw:
+                        instance_data = raw
+                        info.update(raw)
+                        info["containerType"] = raw.get("containerType") or container_type
+                        candidate_ip = self._extract_ip_candidate(raw)
+                        if candidate_ip:
+                            ip_source = "api.notebook.runtime"
+                        break
 
-        for source in (source_task, monitor_data or {}, runtime_detail or {}, instance_data or {}):
+        if successful_requests == 0 and errors:
+            raise errors[0]
+
+        for source in (monitor_data or {}, instance_data or {}, runtime_detail or {}, source_task, task):
             for key in ("status", "taskStatus"):
                 if source.get(key):
                     info["status"] = source.get(key)
@@ -496,25 +539,41 @@ class ContainerClient:
             if info.get("status"):
                 break
 
-        for key in ("startTime", "createTime"):
-            if source_task.get(key):
-                info["startTime"] = source_task.get(key)
-                break
-        if source_task.get("timeoutLimit"):
-            info["timeoutLimit"] = source_task.get("timeoutLimit")
-        remaining = source_task.get("remainTime") or source_task.get("remainingTime")
-        if remaining:
-            info["remainingTime"] = remaining
+        status_norm = str(info.get("status") or "").strip().lower()
+        no_ip_expected = {
+            "waiting",
+            "queued",
+            "pending",
+            "creating",
+            "starting",
+            "stopped",
+            "stop",
+            "terminated",
+            "failed",
+        }
+        if not candidate_ip and errors and status_norm not in no_ip_expected:
+            raise errors[-1]
 
-        candidate_ip = (
-            self._extract_ip_candidate(instance_data)
-            or self._extract_ip_candidate(runtime_detail)
-            or self._extract_ip_candidate(source_task)
-            or self._extract_ip_candidate(task)
-        )
+        for source in (source_task, monitor_data or {}, runtime_detail or {}, instance_data or {}, task):
+            for key in ("startTime", "createTime"):
+                if source.get(key):
+                    info["startTime"] = source.get(key)
+                    break
+            if info.get("startTime"):
+                break
+        for source in (source_task, task, monitor_data or {}):
+            if source.get("timeoutLimit"):
+                info["timeoutLimit"] = source.get("timeoutLimit")
+                break
+        for source in (source_task, monitor_data or {}, task):
+            remaining = source.get("remainTime") or source.get("remainingTime")
+            if remaining:
+                info["remainingTime"] = remaining
+                break
+
         if candidate_ip:
             info["instanceIp"] = candidate_ip
-            info["ipSource"] = "api.notebook.runtime"
+            info["ipSource"] = ip_source or "api.notebook"
 
         info["id"] = source_task.get("id") or task.get("id") or notebook_id
         if source_task.get("instanceId") or task.get("instanceId"):
@@ -524,9 +583,17 @@ class ContainerClient:
         elif source_task.get("taskId") or task.get("taskId"):
             info["taskId"] = source_task.get("taskId") or task.get("taskId")
         for key in ("notebookName", "taskName", "name"):
-            if source_task.get(key):
-                info[key] = source_task.get(key)
+            value = source_task.get(key) or task.get(key)
+            if value:
+                info[key] = value
         return info
+
+    def get_notebook_instance_info(self, notebook_id: str) -> Dict[str, Any]:
+        """Fetch Notebook state directly by its persisted record ID."""
+        record_id = str(notebook_id or "").strip()
+        if not record_id:
+            raise ValueError("Notebook record ID is required.")
+        return self._get_notebook_instance_info({"id": record_id}, record_id)
 
     def get_container_instance_info_by_name(self, name: str) -> Optional[Dict[str, Any]]:
         """
@@ -546,21 +613,29 @@ class ContainerClient:
         - remainingTime（如有）
         - instanceServiceId
         """
-        task = self.find_instance_by_name(name)
-        if not task:
-            return None
-        service_id = task.get("instanceServiceId") or task.get("id")
-        if not service_id:
-            return None
         service_type = self._service_type(reload=False)
 
         if service_type == "notebook":
+            configured_id = self.configured_notebook_id(reload=False)
+            if configured_id:
+                return self.get_notebook_instance_info(configured_id)
+
+            task = self.find_instance_by_name(name)
+            if not task:
+                return None
             # Notebook lifecycle endpoints use the record id returned by
             # /api/notebook/task. Runtime instance probes use instanceId.
             notebook_task_id = task.get("id")
             if not notebook_task_id:
                 return None
             return self._get_notebook_instance_info(task, str(notebook_task_id))
+
+        task = self.find_instance_by_name(name)
+        if not task:
+            return None
+        service_id = task.get("instanceServiceId") or task.get("id")
+        if not service_id:
+            return None
 
         info: Dict[str, Any] = {}
         try:

@@ -36,7 +36,7 @@ class MultiContainerManager:
         """
         Normalize config:
         - Global `acs` is shared.
-        - Each container keeps only `acs.container_name` + `acs.service_type`.
+        - Each container keeps only its ACS binding fields.
         - Migrate ssh.remote_server_ip -> ssh.bastion_host.
         - Preserve container task definitions.
         """
@@ -44,7 +44,11 @@ class MultiContainerManager:
             root = self.base_store.read(reload=True)
             containers = root.get("containers") or []
             base_acs = root.get("acs", {}) if isinstance(root.get("acs"), dict) else {}
-            base_acs = {k: v for k, v in base_acs.items() if k not in ("container_name", "service_type")}
+            base_acs = {
+                k: v
+                for k, v in base_acs.items()
+                if k not in ("container_name", "service_type", "notebook_id")
+            }
             root["acs"] = base_acs
             normalized: List[Dict[str, Any]] = []
             for idx, c in enumerate(containers):
@@ -60,6 +64,9 @@ class MultiContainerManager:
                     "container_name": container_name,
                     "service_type": service_type,
                 }
+                notebook_id = str(c_acs_raw.get("notebook_id") or "").strip()
+                if str(service_type).strip().lower() == "notebook" and notebook_id:
+                    acs_override["notebook_id"] = notebook_id
                 ssh_raw = c.get("ssh", {}) if isinstance(c.get("ssh"), dict) else {}
                 ssh_clean = dict(ssh_raw)
                 if not ssh_clean.get("bastion_host") and ssh_clean.get("remote_server_ip"):

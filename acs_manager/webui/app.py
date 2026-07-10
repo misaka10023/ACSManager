@@ -437,6 +437,7 @@ def _default_container_editor(name: str) -> Dict[str, Any]:
         "acs": {
             "container_name": name,
             "service_type": "container",
+            "notebook_id": "",
         },
         "restart": {
             "strategy": "restart",
@@ -471,9 +472,13 @@ def _normalize_container_editor(container: Any, idx: int = 0) -> Dict[str, Any]:
     editor["name"] = name
 
     acs_raw = raw.get("acs", {}) if isinstance(raw.get("acs"), dict) else {}
+    service_type = str(acs_raw.get("service_type") or "container").strip().lower() or "container"
+    if service_type not in {"container", "notebook"}:
+        service_type = "container"
     editor["acs"] = {
         "container_name": str(acs_raw.get("container_name") or name).strip() or name,
-        "service_type": str(acs_raw.get("service_type") or "container").strip().lower() or "container",
+        "service_type": service_type,
+        "notebook_id": str(acs_raw.get("notebook_id") or "").strip() if service_type == "notebook" else "",
     }
 
     ssh_raw = raw.get("ssh", {}) if isinstance(raw.get("ssh"), dict) else {}
@@ -609,7 +614,11 @@ def _containers_for_editor(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
 def _normalize_root_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     root = copy.deepcopy(cfg or {})
     acs = root.get("acs", {}) if isinstance(root.get("acs"), dict) else {}
-    root["acs"] = {k: copy.deepcopy(v) for k, v in acs.items() if k not in {"container_name", "service_type"}}
+    root["acs"] = {
+        k: copy.deepcopy(v)
+        for k, v in acs.items()
+        if k not in {"container_name", "service_type", "notebook_id"}
+    }
     containers = _containers_for_editor(root)
     root["containers"] = [_compact_container_for_root(container, idx) for idx, container in enumerate(containers)]
     return root
@@ -679,10 +688,19 @@ def list_acs_tasks(
     """
     mgr = _any_container_client()
     try:
-        tasks = mgr.container_client.list_task_suggestions(limit=200)
+        requested_type = str(service_type or "").strip().lower()
+        if requested_type not in {"", "container", "notebook"}:
+            raise HTTPException(status_code=400, detail="Unsupported ACS service type")
+        tasks = mgr.container_client.list_task_suggestions(
+            limit=200,
+            service_type=requested_type or None,
+        )
         if service_type:
-            service_type = str(service_type).strip().lower()
-            tasks = [task for task in tasks if str(task.get("service_type") or "").strip().lower() == service_type]
+            tasks = [
+                task
+                for task in tasks
+                if str(task.get("service_type") or "").strip().lower() == requested_type
+            ]
         if keyword:
             term = str(keyword).strip().lower()
             tasks = [task for task in tasks if term in str(task.get("name") or "").strip().lower()]
@@ -691,7 +709,7 @@ def list_acs_tasks(
         raise
     except Exception as exc:  # pragma: no cover - network
         logger.error("Failed to list ACS tasks: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to list ACS tasks")
+        raise HTTPException(status_code=502, detail="Failed to list ACS tasks")
 
 
 @app.get("/container-ip")
@@ -767,13 +785,33 @@ async def stop_tunnel(container_id: str, user: str = Depends(require_auth)) -> d
 
 
 @app.post("/containers/{container_id}/refresh-ip")
-def refresh_ip(container_id: str, user: str = Depends(require_auth)) -> dict:
+def refresh_ip(container_id: str, user: str = Depends(require_auth)) -> Any:
     mgr = _resolve_manager(container_id)
     if mgr is None:
         raise HTTPException(status_code=404, detail="Container not found")
     ip = mgr.resolve_container_ip(force_login=True)
     snap = mgr.snapshot()
-    return {"ip": ip, "container_ip": ip, "source": snap.get("ip_source") or "api"}
+    probe_status = str(snap.get("probe_status") or "unknown")
+    payload = {
+        "ip": ip,
+        "container_ip": ip,
+        "cached_ip": snap.get("container_ip") if not ip else None,
+        "source": snap.get("ip_source") or "api",
+        "probe_status": probe_status,
+        "stale": bool(snap.get("ip_stale")),
+        "message": "IP refreshed" if ip else "Notebook is available but has no IP yet",
+    }
+    if ip:
+        return payload
+    if probe_status == "pending":
+        return JSONResponse(status_code=202, content=payload)
+    if probe_status == "not_found":
+        raise HTTPException(status_code=404, detail="Configured ACS task was not found")
+    if probe_status in {"auth_error", "upstream_error"}:
+        raise HTTPException(status_code=502, detail="ACS query failed")
+    if probe_status == "config_error":
+        raise HTTPException(status_code=400, detail="ACS container binding is not configured")
+    raise HTTPException(status_code=503, detail="Container IP is not available")
 
 
 @app.post("/containers/{container_id}/restart-container")
@@ -959,6 +997,7 @@ async def clone_config_container(container_id: str, payload: dict = Body(default
     source["name"] = new_name
     source["id"] = new_name
     source["acs"]["container_name"] = ""
+    source["acs"]["notebook_id"] = ""
     containers.insert(idx + 1, _normalize_container_editor(source, idx + 1))
     root["containers"] = [_compact_container_for_root(item, pos) for pos, item in enumerate(containers)]
     new_cfg = await _persist_root_config(old_cfg, root)
@@ -1031,6 +1070,7 @@ def _container_critical_map(cfg: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
             snapshots[cid] = {
                 "acs.container_name": acs_cfg.get("container_name"),
                 "acs.service_type": acs_cfg.get("service_type"),
+                "acs.notebook_id": acs_cfg.get("notebook_id"),
                 "ssh.mode": ssh_cfg.get("mode"),
                 "ssh.bastion_host": ssh_cfg.get("bastion_host"),
                 "ssh.bastion_user": ssh_cfg.get("bastion_user"),
@@ -1051,6 +1091,7 @@ def _container_critical_map(cfg: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     snapshots[legacy_id] = {
         "acs.container_name": base_acs.get("container_name"),
         "acs.service_type": base_acs.get("service_type"),
+        "acs.notebook_id": base_acs.get("notebook_id"),
         "ssh.mode": ssh_cfg.get("mode"),
         "ssh.bastion_host": ssh_cfg.get("bastion_host") or ssh_cfg.get("remote_server_ip"),
         "ssh.bastion_user": ssh_cfg.get("bastion_user"),

@@ -170,6 +170,7 @@ window.ConfigWorkbench = (() => {
       acs: {
         container_name: '',
         service_type: 'container',
+        notebook_id: '',
       },
       restart: {
         strategy: 'restart',
@@ -198,6 +199,7 @@ window.ConfigWorkbench = (() => {
     const acs = raw.acs && typeof raw.acs === 'object' ? raw.acs : {};
     const ssh = raw.ssh && typeof raw.ssh === 'object' ? raw.ssh : {};
     const restart = raw.restart && typeof raw.restart === 'object' ? raw.restart : {};
+    const serviceType = String(acs.service_type || 'container').toLowerCase() === 'notebook' ? 'notebook' : 'container';
     const forwards = Array.isArray(ssh.forwards)
       ? ssh.forwards
           .map((item) => ({ local: toNumberOrNull(item?.local), remote: toNumberOrNull(item?.remote) }))
@@ -219,7 +221,8 @@ window.ConfigWorkbench = (() => {
       name,
       acs: {
         container_name: String(acs.container_name || ''),
-        service_type: String(acs.service_type || 'container').toLowerCase() === 'notebook' ? 'notebook' : 'container',
+        service_type: serviceType,
+        notebook_id: serviceType === 'notebook' ? String(acs.notebook_id || '') : '',
       },
       restart: {
         strategy: ['restart', 'recreate', 'none'].includes(String(restart.strategy || '').toLowerCase())
@@ -500,9 +503,12 @@ window.ConfigWorkbench = (() => {
     }
     return state.taskSuggestions
       .map((task) => {
-        const selected = String(task.name) === String(currentValue) ? 'selected' : '';
+        const taskId = String(task.id || '');
+        const selected = container.acs.notebook_id
+          ? (taskId === String(container.acs.notebook_id) ? 'selected' : '')
+          : (String(task.name) === String(currentValue) ? 'selected' : '');
         const meta = [task.service_type, task.status].filter(Boolean).join(' / ');
-        return `<option value="${escapeHtml(task.name)}" ${selected}>${escapeHtml(task.name)}${meta ? ` (${escapeHtml(meta)})` : ''}</option>`;
+        return `<option value="${escapeHtml(task.name)}" data-task-id="${escapeHtml(taskId)}" data-service-type="${escapeHtml(task.service_type || '')}" ${selected}>${escapeHtml(task.name)}${meta ? ` (${escapeHtml(meta)})` : ''}</option>`;
       })
       .join('');
   }
@@ -685,7 +691,8 @@ window.ConfigWorkbench = (() => {
             renderField({ label: '容器名称', tip: '本地唯一标识，同时用于 Web UI 展示和 manager 键。', control: inputControl('name', container.name, { placeholder: 'E2SRLF' }) }),
             renderField({ label: '服务类型', tip: 'container 使用 instance-service；notebook 使用 /api/notebook/task。', control: inputControl('acs.service_type', container.acs.service_type, { type: 'select', choices: [{ value: 'container', label: 'container' }, { value: 'notebook', label: 'notebook' }] }) }),
             renderField({ label: '重启策略', tip: 'restart 会尝试重启原任务；recreate 会创建新任务；none 不自动重启或重建。', control: inputControl('restart.strategy', container.restart.strategy, { type: 'select', choices: [{ value: 'restart', label: 'restart' }, { value: 'recreate', label: 'recreate' }, { value: 'none', label: 'none / 不重启' }] }) }),
-            renderField({ label: 'ACS 任务名称', tip: 'container 建议填实例名；notebook 可填基础名。', help: '下方列表来自 ACS 任务查询；选择后会自动填入此输入框。', control: inputControl('acs.container_name', container.acs.container_name, { placeholder: 'Notebook_2604107259' }), span: 2 }),
+            renderField({ label: 'ACS 任务名称', tip: 'container 填实例名；notebook 应选择真实任务名称。', help: '下方列表来自 ACS 任务查询；选择后会同时保存名称和 Notebook ID。', control: inputControl('acs.container_name', container.acs.container_name, { placeholder: 'Notebook_2604107259' }), span: 2 }),
+            renderField({ label: 'ACS Notebook ID', tip: 'Notebook 记录的稳定标识，由任务下拉自动填写。', control: inputControl('acs.notebook_id', container.acs.notebook_id, { placeholder: '选择 Notebook 后自动填写', attrs: 'readonly' }) }),
             renderField({ label: 'ACS 任务下拉', tip: '按当前服务类型和输入关键字过滤，可点击刷新重新拉取。', control: `<div class="stack-sm"><div class="inline-actions"><button type="button" class="btn btn-secondary btn-xxs" data-action="refresh-acs-tasks">刷新 ACS 列表</button></div><select class="input suggestion-select" size="6" data-action="pick-acs-task">${renderSuggestionOptions(container)}</select></div>`, span: 3 }),
           ].join('')
         )}
@@ -1289,6 +1296,9 @@ window.ConfigWorkbench = (() => {
         touchContainerDraft((draft) => {
           setByPath(draft, path, parseFieldValue(target));
           if (path === 'name') draft.id = draft.name;
+          if (path === 'acs.container_name' || path === 'acs.service_type') {
+            draft.acs.notebook_id = '';
+          }
         });
         if (path === 'name' || path === 'acs.container_name') renderSidebar();
         if (path === 'acs.service_type' || path === 'acs.container_name') scheduleTaskSuggestionRefresh();
@@ -1334,8 +1344,10 @@ window.ConfigWorkbench = (() => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
     if (target.matches('[data-action="pick-acs-task"]')) {
+      const option = target instanceof HTMLSelectElement ? target.options[target.selectedIndex] : null;
       touchContainerDraft((draft) => {
         draft.acs.container_name = target.value;
+        draft.acs.notebook_id = draft.acs.service_type === 'notebook' ? option?.dataset.taskId || '' : '';
       });
       renderAll();
       scheduleTaskSuggestionRefresh();

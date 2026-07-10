@@ -128,6 +128,8 @@
         const ip = escapeHtml(c.container_ip || 'unknown');
         const source = escapeHtml(c.ip_source || 'unknown');
         const status = escapeHtml(c.container_status || 'unknown');
+        const probeStatus = escapeHtml(c.probe_status || 'idle');
+        const ipStale = Boolean(c.ip_stale);
         const serviceType = escapeHtml(c.service_type || 'container');
         const tunnel = escapeHtml(c.tunnel_status || 'stopped');
         const lastSeen = escapeHtml(c.last_seen || '');
@@ -143,7 +145,8 @@
             <div class="text-xs text-slate-600">Type: ${serviceType}</div>
             ${configuredName ? `<div class="text-xs text-slate-500 truncate">ACS name: <span class="font-mono">${configuredName}</span></div>` : ''}
             <div class="text-xs text-slate-600">Status: ${status}</div>
-            <div class="text-xs text-slate-600 truncate">IP: <span class="font-mono">${ip}</span> <span class="text-slate-400">(${source})</span></div>
+            <div class="text-xs text-slate-600">Probe: ${probeStatus}${ipStale ? ' / stale' : ''}</div>
+            <div class="text-xs text-slate-600 truncate">IP: <span class="font-mono">${ip}</span> <span class="text-slate-400">(${source}${ipStale ? ', stale' : ''})</span></div>
             ${remaining ? `<div class="text-xs text-slate-600">剩余时间: ${remaining}</div>` : ''}
             ${lastSeen ? `<div class="text-xs text-slate-500">Last seen: ${lastSeen}</div>` : ''}
             ${

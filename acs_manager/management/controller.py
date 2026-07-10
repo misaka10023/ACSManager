@@ -56,6 +56,10 @@ class ContainerManager:
             "container_status": None,
             "container_start_time": None,
             "remaining_time_str": None,
+            "last_probe_at": None,
+            "probe_status": "idle",
+            "probe_error": None,
+            "ip_stale": False,
         }
         self._tunnel_process: Optional[Process] = None
         self._proc_lock = asyncio.Lock()
@@ -81,6 +85,63 @@ class ContainerManager:
         if self.is_placeholder_container_name(name):
             return None
         return str(name).strip()
+
+    def configured_notebook_id(self, *, reload: bool = False) -> Optional[str]:
+        cfg = self._acs_cfg(reload=reload)
+        if str(cfg.get("service_type") or "container").strip().lower() != "notebook":
+            return None
+        notebook_id = str(cfg.get("notebook_id") or "").strip()
+        return notebook_id or None
+
+    def _set_probe_state(self, status: str, error: Optional[Exception | str] = None) -> None:
+        self.state["last_probe_at"] = dt.datetime.now()
+        self.state["probe_status"] = status
+        self.state["probe_error"] = str(error) if error else None
+        cached_ip = self.state.get("container_ip")
+        if not cached_ip:
+            try:
+                cached_ip = self._ssh_cfg(reload=False).get("container_ip")
+            except Exception:
+                cached_ip = None
+        self.state["ip_stale"] = bool(cached_ip) and status != "resolved"
+
+    @staticmethod
+    def _probe_status_for_exception(exc: Exception) -> str:
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None) if response is not None else None
+        if status_code in {401, 403}:
+            return "auth_error"
+        if status_code == 404:
+            return "not_found"
+        return "upstream_error"
+
+    def _persist_legacy_notebook_binding(self, info: Dict[str, Any]) -> None:
+        cfg = self._acs_cfg(reload=False)
+        if str(cfg.get("service_type") or "container").strip().lower() != "notebook":
+            return
+        if str(cfg.get("notebook_id") or "").strip():
+            return
+
+        notebook_id = str(info.get("id") or "").strip()
+        if not notebook_id:
+            return
+        matched_name = str(
+            info.get("notebookName")
+            or info.get("taskName")
+            or info.get("name")
+            or cfg.get("container_name")
+            or ""
+        ).strip()
+        self.store.update(
+            {
+                "acs": {
+                    "container_name": matched_name,
+                    "service_type": "notebook",
+                    "notebook_id": notebook_id,
+                }
+            }
+        )
+        logger.info("Persisted Notebook binding for %s (id: %s).", matched_name, notebook_id)
 
     @staticmethod
     def _slugify_task_id(value: Optional[str], fallback: str) -> str:
@@ -186,6 +247,7 @@ class ContainerManager:
         """捕获到新的容器 IP 时更新状态，若隧道已启动则重启隧道。"""
         old_ip = self.state.get("container_ip")
         self.state["last_seen"] = dt.datetime.now()
+        self._set_probe_state("resolved")
         if source:
             self.state["ip_source"] = source
 
@@ -220,32 +282,43 @@ class ContainerManager:
         """在 IP 未知时通过 API 自动获取。"""
         name = self.configured_container_name(reload=True)
         if not name:
+            self._set_probe_state("config_error", "acs.container_name is not configured")
             logger.warning("acs.container_name not configured or placeholder; cannot auto-resolve IP.")
             return None
         if force_login:
             try:
                 self.container_client.login()
             except Exception as exc:  # pragma: no cover - network errors
+                self._set_probe_state("auth_error", exc)
                 logger.error("Login failed while resolving container IP: %s", exc)
                 return None
         try:
             info = self.container_client.get_container_instance_info_by_name(name)
         except Exception as exc:  # pragma: no cover - network errors
+            self._set_probe_state(self._probe_status_for_exception(exc), exc)
             logger.error("Failed to query container %s via API: %s", name, exc)
             return None
-        if info and info.get("instanceIp"):
-            ip = info["instanceIp"]
-            self.state["container_ip"] = ip
-            self.state["last_seen"] = dt.datetime.now()
-            self.state["ip_source"] = info.get("ipSource") or "api"
+        if info:
+            try:
+                self._persist_legacy_notebook_binding(info)
+            except Exception as exc:
+                logger.warning("Failed to persist Notebook binding for %s: %s", name, exc)
             if info.get("status"):
                 self.state["container_status"] = info.get("status")
             if info.get("startTime"):
                 self.state["container_start_time"] = info.get("startTime")
             if info.get("remainingTime"):
                 self.state["remaining_time_str"] = info.get("remainingTime")
+
+        if info and info.get("instanceIp"):
+            ip = info["instanceIp"]
+            self.state["container_ip"] = ip
+            self.state["last_seen"] = dt.datetime.now()
+            self.state["ip_source"] = info.get("ipSource") or "api"
+            self._set_probe_state("resolved")
             logger.info("Resolved container IP via API: %s", ip)
             return ip
+        self._set_probe_state("pending" if info else "not_found")
         logger.warning("Could not resolve container %s IP from API.", name)
         return None
 
@@ -473,6 +546,39 @@ class ContainerManager:
             return False
 
         if str(resp.get("code")) == "0":
+            response_data = resp.get("data")
+            if isinstance(response_data, dict):
+                new_notebook_id = str(
+                    response_data.get("id")
+                    or response_data.get("notebookId")
+                    or response_data.get("taskId")
+                    or ""
+                ).strip()
+            else:
+                new_notebook_id = str(response_data or "").strip()
+            if not new_notebook_id:
+                logger.error("Created notebook task %s but ACS returned no record id: %s", new_name, resp)
+                return False
+
+            try:
+                self.store.update(
+                    {
+                        "acs": {
+                            "container_name": new_name,
+                            "service_type": "notebook",
+                            "notebook_id": new_notebook_id,
+                        }
+                    }
+                )
+            except Exception as exc:  # pragma: no cover - IO errors
+                logger.error(
+                    "Created notebook task %s (id: %s) but failed to persist its binding: %s",
+                    new_name,
+                    new_notebook_id,
+                    exc,
+                )
+                return False
+
             restart_cfg.update(
                 {
                     "strategy": restart_cfg.get("strategy") or "recreate",
@@ -484,10 +590,6 @@ class ContainerManager:
             self._persist_restart_cfg(restart_cfg)
             self.state["last_restart"] = dt.datetime.now()
             logger.info("Created new notebook task %s from %s: %s", new_name, base_name, resp)
-            try:
-                self.store.update({"acs": {"container_name": new_name}})
-            except Exception as exc:  # pragma: no cover - IO errors
-                logger.warning("Failed to persist new notebook container_name %s: %s", new_name, exc)
             return True
 
         logger.error("Create new notebook task failed: %s", resp)
@@ -510,12 +612,30 @@ class ContainerManager:
             logger.info("Restart strategy is none; skip restarting or recreating container %s.", name)
             return "skipped"
 
-        service_type = str(self._acs_cfg(reload=True).get("service_type") or "container").strip().lower()
-        try:
-            task = await asyncio.to_thread(self.container_client.find_instance_by_name, name)
-        except Exception as exc:
-            logger.error("Failed to query container %s; cannot restart: %s", name, exc)
-            task = None
+        acs_cfg = self._acs_cfg(reload=True)
+        service_type = str(acs_cfg.get("service_type") or "container").strip().lower()
+        notebook_id = str(acs_cfg.get("notebook_id") or "").strip()
+        if service_type == "notebook" and notebook_id:
+            bound_info = info
+            if bound_info is None:
+                try:
+                    bound_info = await asyncio.to_thread(
+                        self.container_client.get_notebook_instance_info,
+                        notebook_id,
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to load bound Notebook %s before restart: %s", name, exc)
+            task = dict(bound_info or {})
+            task["id"] = notebook_id
+            task.setdefault("notebookName", name)
+        else:
+            try:
+                task = await asyncio.to_thread(self.container_client.find_instance_by_name, name)
+                if service_type == "notebook" and task:
+                    await asyncio.to_thread(self._persist_legacy_notebook_binding, task)
+            except Exception as exc:
+                logger.error("Failed to query container %s; cannot restart: %s", name, exc)
+                task = None
 
         restart_target = task or info
         recreate_target = task or info
@@ -1069,12 +1189,18 @@ class ContainerManager:
             try:
                 info = await asyncio.to_thread(self._fetch_info_sync, name)
                 if info:
+                    try:
+                        await asyncio.to_thread(self._persist_legacy_notebook_binding, info)
+                    except Exception as exc:
+                        logger.warning("Failed to persist Notebook binding for %s: %s", name, exc)
                     status = info.get("status")
                     start_time_str = info.get("startTime") or info.get("createTime")
                     self.update_container_status(status, start_time_str)
                     ip = info.get("instanceIp")
                     if ip:
-                        await self.handle_new_ip(ip)
+                        await self.handle_new_ip(ip, source=info.get("ipSource") or "api")
+                    else:
+                        self._set_probe_state("pending")
 
                     # 使用 startTime + timeoutLimit 计算预计停止时间与剩余秒数
                     start_dt = self._parse_start_time(start_time_str)
@@ -1137,9 +1263,11 @@ class ContainerManager:
                             logger.warning("Container %s status is %s; restart result=%s.", name, status, result)
                         interval = fast_interval
                 else:
+                    self._set_probe_state("not_found")
                     logger.warning("Container %s not found; will retry soon.", name)
                     interval = fast_interval
             except Exception as exc:  # pragma: no cover - network/API errors
+                self._set_probe_state(self._probe_status_for_exception(exc), exc)
                 logger.error("Monitor loop error for %s: %s", self.container_id, exc, exc_info=True)
                 interval = fast_interval
 
@@ -1688,6 +1816,7 @@ done
             acs_cfg = self._acs_cfg(reload=False)
             snap["configured_container_name"] = acs_cfg.get("container_name")
             snap["service_type"] = (acs_cfg.get("service_type") or "container").lower()
+            snap["notebook_id"] = acs_cfg.get("notebook_id")
         except Exception:
             pass
         if not snap.get("container_ip"):
@@ -1696,7 +1825,8 @@ done
                 fallback_ip = ssh_cfg.get("container_ip") if isinstance(ssh_cfg, dict) else None
                 if fallback_ip:
                     snap["container_ip"] = fallback_ip
-                    snap.setdefault("ip_source", "fallback")
+                    if not snap.get("ip_source"):
+                        snap["ip_source"] = "fallback"
             except Exception:
                 pass
         return snap
@@ -1712,6 +1842,7 @@ done
             await asyncio.to_thread(self.container_client.login)
             logger.info("Logged in to ACS for startup check.")
         except Exception as exc:
+            self._set_probe_state("auth_error", exc)
             logger.error("Login failed during startup preparation: %s", exc)
             return
 
@@ -1722,13 +1853,18 @@ done
             try:
                 info = self._fetch_info_sync(current_name)
             except Exception as exc:
+                self._set_probe_state(self._probe_status_for_exception(exc), exc)
                 logger.error("Failed to fetch container info for %s: %s", current_name, exc, exc_info=True)
                 return current_name, None
             return current_name, info
 
         name, info = await asyncio.to_thread(_fetch_with_current_name)
         if not info:
-            logger.warning("Container %s not found during startup check.", name)
+            if self.state.get("probe_status") in {"auth_error", "upstream_error"}:
+                logger.warning("Container %s info unavailable during startup check.", name)
+            else:
+                self._set_probe_state("not_found")
+                logger.warning("Container %s not found during startup check.", name)
             return
 
         status = (info.get("status") or "").lower()
@@ -1736,7 +1872,9 @@ done
         self.update_container_status(info.get("status"), start_time)
         ip = info.get("instanceIp")
         if ip:
-            await self.handle_new_ip(ip)
+            await self.handle_new_ip(ip, source=info.get("ipSource") or "api")
+        else:
+            self._set_probe_state("pending")
 
         async def _wait_for_running() -> None:
             deadline = dt.datetime.now() + dt.timedelta(seconds=start_timeout)

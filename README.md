@@ -57,7 +57,7 @@ copy config\examples\settings.example.yaml config\local\settings.yaml
 
 ## 配置要点
 
-配置文件推荐使用 `containers` 列表管理多个容器。全局 `acs` 保存 ACS 登录信息和 Cookie，容器级 `acs` 只保存当前容器对应的 `container_name` 和 `service_type`。
+配置文件推荐使用 `containers` 列表管理多个容器。全局 `acs` 保存 ACS 登录信息和 Cookie，容器级 `acs` 保存当前容器对应的 `container_name`、`service_type`，以及 Notebook 可选的 `notebook_id`。
 
 最少需要填写：
 
@@ -67,12 +67,14 @@ copy config\examples\settings.example.yaml config\local\settings.yaml
 - `containers[].name`：本项目内的唯一标识，也是网页界面的展示名。
 - `containers[].acs.container_name`：ACS 中实际任务名。
 - `containers[].acs.service_type`：`container` 或 `notebook`。
+- `containers[].acs.notebook_id`：Notebook 记录 ID；通过 Web UI 任务下拉自动填写，旧配置首次精确匹配成功后自动补齐。
 - `containers[].ssh`：SSH 登录、跳板、端口和转发配置。
 
 `service_type` 的区别：
 
 - `container` 使用 `instance-service` 相关 ACS 接口。
 - `notebook` 使用 `/api/notebook/task` 相关 ACS 接口。
+- Notebook 配置有 `notebook_id` 后直接按 ID 探测；名称只用于展示、日志和重建命名，不进行运行态模糊匹配。
 - 两种模式的 SSH 隧道、任务执行和网页展示逻辑共用。
 
 重启策略：
@@ -121,7 +123,7 @@ copy config\examples\settings.example.yaml config\local\settings.yaml
 - `POST /config/containers`：新增容器。
 - `POST /config/containers/{id}/clone`：复制容器。
 - `POST /config/containers/reorder`：调整容器顺序。
-- `POST /containers/{id}/refresh-ip`：刷新容器 IP。
+- `POST /containers/{id}/refresh-ip`：刷新容器 IP；成功返回 200，任务存在但暂无 IP 返回 202，绑定不存在返回 404，ACS 查询失败返回 502。
 - `POST /containers/{id}/restart-container`：按策略重启、重建或跳过容器操作。
 - `POST /containers/{id}/tasks/{task_id}/run`：手动执行容器任务。
 - `GET /logs?lines=N`：读取最近 N 行日志。

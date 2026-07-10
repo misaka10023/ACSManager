@@ -20,6 +20,7 @@ containers:
     acs:
       container_name: "default"          # ACS 任务列表中的容器/任务名称
       service_type: "container"          # container|notebook；notebook 使用 /api/notebook/task 系列接口
+      notebook_id: ""                    # notebook 记录 ID；建议通过 Web UI 任务下拉自动填写
     restart:
       strategy: "restart"                # restart|recreate|none
     ssh:
@@ -44,6 +45,7 @@ containers:
 #    acs:
 #      container_name: "Another"
 #      service_type: "notebook"
+#      notebook_id: "notebook-record-id"
 #    restart:
 #      strategy: "restart"
 #    ssh:
